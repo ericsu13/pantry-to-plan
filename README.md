@@ -113,6 +113,36 @@ same plan. The eval and invariant tests use `temperature=0`; a dedicated test
 class exercises the sampled path across many seeds and confirms no hard
 constraint is ever violated.
 
+## Agentic planning (opt-in)
+
+Two optional strategies let a model shape the plan without ever touching the
+arithmetic. They activate only when a `PlannerAdvisor` is injected into
+`generate_plan(..., advisor=...)`; with no advisor the default greedy loop
+above runs unchanged. The governing rule is **agent proposes, deterministic
+core disposes**: the advisor only decides *what to try*, while scoring,
+eligibility, the vegetarian gate, depletion, and shopping-list reconciliation
+stay in deterministic Python.
+
+- **Whole-week planning (#3)**: the advisor proposes an ordered week from the
+  scored candidate pool, optimizing cross-day goals (minimize the shopping list,
+  deplete the pantry smartly, keep variety). The core then validates every
+  proposed recipe (unknown id, repeat, or vegetarian violation is dropped) and
+  materializes it, so no proposal can break an invariant.
+- **Relax-and-repair (#1)**: when a day cannot be filled, the advisor picks one
+  relaxation from a fixed menu (`ALLOW_REPEAT`, `CROSS_CUISINE`, `GIVE_UP`) and
+  the core applies it deterministically. Crossing into another cuisine is a
+  flagged last resort (`cross_cuisine` flag, `RELAXED_CROSS_CUISINE` warning).
+  The loop is bounded by `config.MAX_RELAXATION_ROUNDS`, and the vegetarian gate
+  is never on the menu, so it is never relaxed.
+
+The real advisor ([advisor.py](advisor.py) `LangChainPlannerAdvisor`) calls
+OpenAI via LangChain with structured output; LangSmith tracing is not enabled.
+Tests and evals inject `FakePlannerAdvisor`, a deterministic double, so the
+agentic path is reproducible with no API key. Every agent decision is surfaced
+through the existing `PlanResult.trace`, `PlanResult.warnings`, and
+`DayPlan.flags` fields, so these strategies touch neither the P1 schemas nor the
+P2 corpus/retrieval contracts.
+
 ## Data model
 
 See [schemas.py](schemas.py) (Pydantic models, frozen shared contracts per the
@@ -141,9 +171,10 @@ corpus/retrieval, P3 planner/inventory, P4 UI/evals).
 | [generate_fixtures.py](generate_fixtures.py) | Builds eval fixtures from the corpus | P4 | done |
 | [fixtures/](fixtures/) | 23 eval scenarios (see [fixtures/README.md](fixtures/README.md)) | P1/P4 | done |
 | [constraints.py](constraints.py) | Hard eligibility (vegetarian gate) | P3 | done |
-| [scoring.py](scoring.py) | Score components + stable tie-break | P3 | done |
+| [scoring.py](scoring.py) | Score components + stable tie-break + softmax select | P3 | done |
 | [inventory.py](inventory.py) | Pantry depletion + shopping-list reconciliation | P3 | done |
-| [pipeline.py](pipeline.py) | Fixed N-day loop + aggregation | P3 | done |
+| [pipeline.py](pipeline.py) | N-day loop (greedy default + agentic strategies) | P3 | done |
+| [advisor.py](advisor.py) | Injected LLM decider for agentic planning (+ fake) | P3 | done |
 | [tests/](tests/) | Planner invariant + scenario tests | P3 | done |
 | `vision.py` | OpenAI vision call -> `PantryParseResult` | P1 | todo |
 | `normalization.py` | Aliases -> canonical ingredient ids | P1 | todo |

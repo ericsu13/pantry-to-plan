@@ -18,13 +18,14 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from advisor import CROSS_CUISINE, GIVE_UP
 from config import calorie_band
 from pipeline import generate_plan
-from repository import get_recipe
+from repository import get_recipe, load_recipes
 from schemas import PantryItem, PantryState, PlanningRequest
 from scoring import rank
 from schemas import CandidateScore
-from tests.fakes import FakeRetriever
+from tests.fakes import FakePlannerAdvisor, FakeRetriever
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FIX_DIR = os.path.join(ROOT, "fixtures")
@@ -240,6 +241,68 @@ class ProbabilisticSelectionTests(unittest.TestCase):
         for seed in range(20):
             r = plan_fixture(fx, rng=random.Random(seed), temperature=5.0)
             self.assertTrue(all(dp.recipe.vegetarian for dp in r.day_plans))
+
+
+class AgenticPlannerTests(unittest.TestCase):
+    """#3 whole-week planning and #1 relax-and-repair, driven by a deterministic
+    fake advisor so no LLM/API key is involved. The deterministic core must still
+    enforce every invariant regardless of what the advisor proposes."""
+
+    def _ids(self, result):
+        return [dp.recipe.recipe_id for dp in result.day_plans]
+
+    def _plan(self, fx, advisor, temperature=0.0):
+        return generate_plan(
+            pantry_of(fx), request_of(fx), FakeRetriever(), temperature=temperature, advisor=advisor
+        )
+
+    def test_week_plan_holds_invariants(self):
+        fx = load_fixture("01_well_stocked_veg_italian")
+        req = request_of(fx)
+        r = self._plan(fx, FakePlannerAdvisor())
+        self.assertEqual(len(r.day_plans), 3)
+        ids = self._ids(r)
+        self.assertEqual(len(ids), len(set(ids)))          # no repeats
+        self.assertTrue(all(dp.recipe.vegetarian for dp in r.day_plans))  # veg gate held
+        for dp in r.day_plans:
+            self.assertEqual(dp.calorie_delta, dp.recipe.calories_per_serving - req.dinner_calorie_target)
+        for item in r.final_pantry:
+            self.assertGreaterEqual(item.quantity_g or 0.0, 0.0)
+
+    def test_advisor_proposal_drives_the_plan(self):
+        # The agent's chosen set/order is what gets materialized, which is how the
+        # minimize-shopping / variety objectives take effect.
+        veg_italian = [r.recipe_id for r in load_recipes() if r.vegetarian and "italian" in r.cuisine_tags]
+        override = veg_italian[:3]
+        fx = load_fixture("01_well_stocked_veg_italian")
+        r = self._plan(fx, FakePlannerAdvisor(week_override=override))
+        self.assertEqual(self._ids(r), override)
+        for sli in r.shopping_list:
+            self.assertGreater(sli.quantity_g, 0.0)
+
+    def test_repair_crosses_cuisine_to_fill(self):
+        # 04 exhausts vegetarian American recipes at day 6; the repair loop must
+        # cross cuisines to fill day 7, flagged, and never break the veg gate.
+        fx = load_fixture("04_veg_exhaustion_american")
+        r = self._plan(fx, FakePlannerAdvisor(relaxation_sequence=[CROSS_CUISINE, GIVE_UP]))
+        self.assertEqual(len(r.day_plans), 7)
+        self.assertTrue(all(dp.recipe.vegetarian for dp in r.day_plans))
+        self.assertIn("RELAXED_CROSS_CUISINE", r.warnings)
+        self.assertTrue(any("cross_cuisine" in dp.flags for dp in r.day_plans))
+        self.assertFalse(r.day_plans[-1].cuisine_match)
+
+    def test_repair_gives_up_returns_partial(self):
+        fx = load_fixture("04_veg_exhaustion_american")
+        r = self._plan(fx, FakePlannerAdvisor(relaxation_sequence=[GIVE_UP]))
+        self.assertEqual(len(r.day_plans), 6)              # only 6 veg American recipes
+        self.assertIn("NO_ELIGIBLE_RECIPE", r.warnings)
+        self.assertTrue(all(dp.recipe.vegetarian for dp in r.day_plans))
+
+    def test_agentic_path_is_reproducible(self):
+        fx = load_fixture("04_veg_exhaustion_american")
+        a = self._plan(fx, FakePlannerAdvisor())
+        b = self._plan(fx, FakePlannerAdvisor())
+        self.assertEqual(self._ids(a), self._ids(b))
 
 
 class ScoringTests(unittest.TestCase):

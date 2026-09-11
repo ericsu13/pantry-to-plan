@@ -1,1 +1,7 @@
 pydantic>=2,<3
+
+# Agentic planner (opt-in). Only needed for the live LangChainPlannerAdvisor;
+# the deterministic path and the fake-based tests import fine without these.
+# LangSmith tracing is intentionally not enabled, so langsmith is not required.
+langchain>=0.3,<0.4
+langchain-openai>=0.2,<0.3
