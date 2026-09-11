@@ -1,0 +1,46 @@
+{
+  "id": "16_veg_tight_band_indian",
+  "description": "Vegetarian Indian with a tight 450 +/- 30 band, 4 days. Combines the hard veg gate with band flagging.",
+  "tags": [
+    "vegetarian",
+    "tight-band",
+    "edge"
+  ],
+  "pantry": {
+    "as_of": "2026-09-11",
+    "items": {
+      "cauliflower": 540,
+      "chickpeas": 600,
+      "cumin": 12,
+      "garam_masala": 18,
+      "garlic": 30,
+      "ginger": 24,
+      "onion": 210,
+      "paneer": 450,
+      "peas": 150,
+      "potato": 540,
+      "red_lentils": 450,
+      "rice": 450,
+      "spinach": 600,
+      "tomato": 360,
+      "turmeric": 9
+    }
+  },
+  "request": {
+    "cuisines": [
+      "indian"
+    ],
+    "calorie_target": 450,
+    "calorie_tolerance": 30,
+    "days": 4,
+    "vegetarian_required": true
+  },
+  "expect": {
+    "all_vegetarian": true,
+    "all_cuisine_match": true,
+    "all_within_calorie_band": false,
+    "some_days_flagged_out_of_band": true,
+    "days_returned": 4,
+    "notes": "Only dal (470) and aloo gobi (440) sit in 420-480; the other 2 veg days are flagged out-of-band but stay vegetarian."
+  }
+}

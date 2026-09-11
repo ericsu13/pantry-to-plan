@@ -1,0 +1,42 @@
+{
+  "id": "11_narrow_band_american_exact",
+  "description": "American, very tight 700 +/- 20 band, 2 days. Cheeseburger hits 700 exactly (delta 0); day 2 must fall back to closest calorie.",
+  "tags": [
+    "tight-band",
+    "exact-match",
+    "fallback",
+    "edge"
+  ],
+  "pantry": {
+    "as_of": "2026-09-11",
+    "items": {
+      "breadcrumbs": 50,
+      "burger_bun": 160,
+      "butter": 40,
+      "cheddar": 180,
+      "flour": 30,
+      "ground_beef": 300,
+      "lettuce": 40,
+      "macaroni": 240,
+      "milk": 300,
+      "onion": 60,
+      "tomato": 80
+    }
+  },
+  "request": {
+    "cuisines": [
+      "american"
+    ],
+    "calorie_target": 700,
+    "calorie_tolerance": 20,
+    "days": 2,
+    "vegetarian_required": false
+  },
+  "expect": {
+    "all_cuisine_match": true,
+    "exact_calorie_match_day_exists": true,
+    "at_least_one_fallback": true,
+    "days_returned": 2,
+    "notes": "Only the cheeseburger (700) is in 680-720. Day 1 delta=0; day 2 closest is mac and cheese (650, delta -50), flagged."
+  }
+}
