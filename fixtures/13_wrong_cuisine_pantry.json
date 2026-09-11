@@ -26,10 +26,10 @@
     "cuisines": [
       "italian"
     ],
-    "calorie_target": 600,
-    "calorie_tolerance": 150,
+    "dinner_calorie_target": 600,
     "days": 3,
-    "vegetarian_required": false
+    "vegetarian_required": false,
+    "goal": "general"
   },
   "expect": {
     "all_cuisine_match": true,

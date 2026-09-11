@@ -1,9 +1,10 @@
 {
   "id": "18_american_family_pantry",
-  "description": "Well-stocked American family pantry; 650 kcal, 5 days, no restriction.",
+  "description": "Well-stocked American family pantry; 650 kcal, 5 days, kids goal (wide band), no restriction.",
   "tags": [
     "well-stocked",
     "omnivore",
+    "kids",
     "happy-path"
   ],
   "pantry": {
@@ -40,15 +41,15 @@
     "cuisines": [
       "american"
     ],
-    "calorie_target": 650,
-    "calorie_tolerance": 150,
+    "dinner_calorie_target": 650,
     "days": 5,
-    "vegetarian_required": false
+    "vegetarian_required": false,
+    "goal": "kids"
   },
   "expect": {
     "all_cuisine_match": true,
     "high_pantry_coverage": true,
     "days_returned": 5,
-    "notes": "Mix of meat, fish, and cheese mains inside 500-800."
+    "notes": "Kids goal -> 650 +/- 200 = 450-850; every American main fits, so the wide band keeps all 5 days in band. Exercises the kids goal band."
   }
 }

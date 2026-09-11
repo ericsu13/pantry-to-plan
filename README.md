@@ -78,9 +78,10 @@ constraint and by how much.
 - **Cuisine**: one or more tags from a fixed list of four (`italian`,
   `american`, `chinese`, `indian`), matching the corpus tags exactly. A recipe
   either matches or it does not, no fuzzy reasoning.
-- **Calories**: one target with a tolerance band (e.g. 600 +/- 150 kcal). One
-  recipe equals one day's dinner; the target is for that single meal, not a full
-  day's macros.
+- **Calories**: one `dinner_calorie_target` plus a tolerance band derived from
+  the request `goal` (`general` +/- 150, `nutritional` +/- 75, `kids` +/- 200
+  kcal). One recipe equals one day's dinner; the target is for that single meal,
+  not a full day's macros.
 - **Vegetarian (optional hard gate)**: a `vegetarian_required` boolean. When on,
   only recipes tagged vegetarian are eligible, enforced as a Pinecone metadata
   filter and again in Python before scoring. It is never relaxed or downgraded
@@ -92,10 +93,12 @@ targets, allergies, per-meal dietary constraints, per-day target variation.
 
 ## Data model
 
-See [schemas.py](schemas.py): `PantryItem`, `PantryState`, `Recipe`, `DayPlan`,
-`ShoppingListItem`. Everything is normalized to grams; unit conversion is out of
-scope. Ingredient ids are lowercase snake_case (e.g. `chicken_breast`) and are
-the join key across pantry, recipes, and shopping list.
+See [schemas.py](schemas.py) (Pydantic models): `PantryItem`,
+`PantryParseResult`, `PlanningRequest`, `Recipe`, `DayPlan`, `CandidateScore`,
+`ShoppingListItem`, `PlanResult`. Everything is normalized to grams; unit
+conversion is out of scope. Ingredient ids are lowercase snake_case (e.g.
+`chicken_breast`) and are the join key across pantry, recipes, and shopping
+list.
 
 ## Repository layout
 
@@ -103,7 +106,7 @@ Current state:
 
 | File | Purpose | Status |
 |---|---|---|
-| [schemas.py](schemas.py) | Core dataclasses | done |
+| [schemas.py](schemas.py) | Core Pydantic models | done |
 | [recipes.py](recipes.py) | 40-recipe corpus, 10 per cuisine, >=4 vegetarian each | done |
 | [generate_fixtures.py](generate_fixtures.py) | Builds eval fixtures from the corpus | done |
 | [fixtures/](fixtures/) | 23 eval scenarios (see [fixtures/README.md](fixtures/README.md)) | done |
@@ -117,7 +120,7 @@ Current state:
 The PRD calls for `recipes.json`; this repo uses [recipes.py](recipes.py)
 instead (typed `Recipe` objects, directly importable, no parse step). The
 retrieval index-build reads from it and writes the Pinecone metadata
-(`cuisine`, `calories`, `vegetarian`).
+(`cuisine_tags`, `calories_per_serving`, `vegetarian`).
 
 ## Eval
 
@@ -133,8 +136,9 @@ Planned assertions (mechanical, not subjective):
 - Every planned day produces exactly one `DayPlan`; a short plan is allowed only
   when a hard constraint leaves no unused recipe, and the reason is reported.
 - With `vegetarian_required=True`, every selected recipe is vegetarian.
-- `cuisine_match` agrees with `recipe.cuisine == cuisine`.
-- `calorie_delta` equals `recipe.calories - calorie_target` exactly.
+- `cuisine_match` agrees with any requested cuisine being in `recipe.cuisine_tags`.
+- `calorie_delta` equals `recipe.calories_per_serving - dinner_calorie_target`
+  exactly.
 - Pantry never goes negative across day mutations.
 - The final shopping list lists only ingredients still short, with
   `grams_needed > 0`.

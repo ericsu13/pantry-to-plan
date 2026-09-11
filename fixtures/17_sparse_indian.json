@@ -17,10 +17,10 @@
     "cuisines": [
       "indian"
     ],
-    "calorie_target": 500,
-    "calorie_tolerance": 150,
+    "dinner_calorie_target": 500,
     "days": 4,
-    "vegetarian_required": false
+    "vegetarian_required": false,
+    "goal": "general"
   },
   "expect": {
     "low_pantry_coverage": true,

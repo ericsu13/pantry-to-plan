@@ -1,9 +1,10 @@
 {
   "id": "19_low_target_veg_italian",
-  "description": "Vegetarian Italian with a low 400 +/- 80 target, 3 days. Pushes the scorer toward lighter dishes (salad, soup).",
+  "description": "Vegetarian Italian with a low 400 target and nutritional goal (325-475 band), 3 days. Pushes the scorer toward lighter dishes (salad, soup).",
   "tags": [
     "vegetarian",
     "low-calorie",
+    "nutritional",
     "edge"
   ],
   "pantry": {
@@ -31,15 +32,15 @@
     "cuisines": [
       "italian"
     ],
-    "calorie_target": 400,
-    "calorie_tolerance": 80,
+    "dinner_calorie_target": 400,
     "days": 3,
-    "vegetarian_required": true
+    "vegetarian_required": true,
+    "goal": "nutritional"
   },
   "expect": {
     "all_vegetarian": true,
     "all_cuisine_match": true,
     "days_returned": 3,
-    "notes": "Caprese (470) and Tuscan bean soup (430) fall in 320-480; the 3rd day flags out-of-band but stays vegetarian."
+    "notes": "Nutritional goal -> 400 +/- 75 = 325-475. Caprese (470) and Tuscan bean soup (430) fall in band; the 3rd day flags out-of-band but stays vegetarian."
   }
 }

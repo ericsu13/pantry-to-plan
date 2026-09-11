@@ -33,10 +33,10 @@
     "cuisines": [
       "italian"
     ],
-    "calorie_target": 600,
-    "calorie_tolerance": 150,
+    "dinner_calorie_target": 600,
     "days": 3,
-    "vegetarian_required": true
+    "vegetarian_required": true,
+    "goal": "general"
   },
   "expect": {
     "all_vegetarian": true,
@@ -44,6 +44,6 @@
     "all_within_calorie_band": true,
     "fallback_flags": false,
     "days_returned": 3,
-    "notes": "Clean happy path: high coverage, every day veg + Italian + in band (450-750), no fallback."
+    "notes": "Clean happy path: high coverage, every day veg + Italian + in band (general goal, 600 +/- 150 = 450-750), no fallback."
   }
 }

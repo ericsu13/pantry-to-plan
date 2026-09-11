@@ -17,6 +17,16 @@ from recipes import RECIPES
 AS_OF = "2026-09-11"  # matches the demo's fixed "today"; not a real plan date
 OUT_DIR = os.path.join(os.path.dirname(__file__), "fixtures")
 
+# Calorie tolerance band (+/- kcal) is derived from the request `goal`, not set
+# per-request. The planner MUST use this same mapping when it scores the band;
+# it is duplicated here only so fixtures can document the derived band in their
+# notes. Keep the two in sync (move to a shared module once planner.py exists).
+GOAL_CALORIE_TOLERANCE = {
+    "general": 150,       # everyday cooking, generous band
+    "nutritional": 75,    # health-focused, tighter band
+    "kids": 200,          # kid-friendly, widest band
+}
+
 by_id = {r.recipe_id: r for r in RECIPES}
 
 
@@ -24,7 +34,7 @@ def by_cuisine(cuisine, veg_only=False):
     return [
         r
         for r in RECIPES
-        if r.cuisine == cuisine and (r.vegetarian or not veg_only)
+        if cuisine in r.cuisine_tags and (r.vegetarian or not veg_only)
     ]
 
 
@@ -37,8 +47,10 @@ def stock(recipe_ids, mult=3.0, drop=()):
     """
     agg = {}
     for rid in recipe_ids:
-        for ing, g in by_id[rid].ingredients.items():
-            agg[ing] = max(agg.get(ing, 0.0), g)
+        for ing in by_id[rid].ingredients:
+            agg[ing.ingredient_id] = max(
+                agg.get(ing.ingredient_id, 0.0), ing.quantity_g
+            )
     return {
         ing: round(g * mult)
         for ing, g in sorted(agg.items())
@@ -57,13 +69,14 @@ def fixture(fid, description, tags, pantry, request, expect):
     }
 
 
-def req(cuisines, target, tol, days, veg=False):
+def req(cuisines, target, days, goal="general", veg=False):
+    assert goal in GOAL_CALORIE_TOLERANCE, f"unknown goal: {goal}"
     return {
         "cuisines": cuisines if isinstance(cuisines, list) else [cuisines],
-        "calorie_target": target,   # kcal for the one dinner recipe of the day
-        "calorie_tolerance": tol,   # +/- band; outside -> pick-best-and-flag
+        "dinner_calorie_target": target,  # kcal for the one dinner recipe of the day
         "days": days,
         "vegetarian_required": veg,
+        "goal": goal,                     # -> band via GOAL_CALORIE_TOLERANCE
     }
 
 
@@ -83,7 +96,7 @@ FIXTURES = [
             ],
             mult=3.0,
         ),
-        req("italian", 600, 150, 3, veg=True),
+        req("italian", 600, 3, goal="general", veg=True),
         {
             "all_vegetarian": True,
             "all_cuisine_match": True,
@@ -91,45 +104,48 @@ FIXTURES = [
             "fallback_flags": False,
             "days_returned": 3,
             "notes": "Clean happy path: high coverage, every day veg + Italian "
-            "+ in band (450-750), no fallback.",
+            "+ in band (general goal, 600 +/- 150 = 450-750), no fallback.",
         },
     ),
     # ============================================================= key case 2
     fixture(
         "02_sparse_chinese_fallback",
-        "Nearly empty pantry, Chinese cuisine, 5 days. Only 4 Chinese recipes "
-        "fall in the 350-550 band, so day 5 must fall back to closest calorie.",
-        ["sparse", "fallback", "edge"],
+        "Nearly empty pantry, Chinese cuisine, 5 days, nutritional goal. Only 4 "
+        "Chinese recipes fall in the 375-525 band, so day 5 must fall back to "
+        "closest calorie.",
+        ["sparse", "fallback", "nutritional", "edge"],
         {"rice": 120, "soy_sauce": 40, "garlic": 20},
-        req("chinese", 450, 100, 5, veg=False),
+        req("chinese", 450, 5, goal="nutritional", veg=False),
         {
             "low_pantry_coverage": True,
             "all_cuisine_match": True,
             "at_least_one_fallback": True,
             "days_returned": 5,
-            "notes": "4 recipes in band (broccoli 410, egg-drop 440, fried "
-            "rice 480, kung pao tofu 520); 5th day forced to closest-calorie "
-            "outside band (e.g. mapo/lo mein 560). Proves fallback fires "
-            "instead of crashing or returning nothing.",
+            "notes": "Nutritional goal -> 450 +/- 75 = 375-525. 4 recipes in "
+            "band (broccoli 410, egg-drop 440, fried rice 480, kung pao tofu "
+            "520); 5th day forced to closest-calorie outside band (mapo/lo "
+            "mein 560). Proves fallback fires instead of returning nothing.",
         },
     ),
     # ============================================================= key case 3
     fixture(
         "03_tight_band_indian",
-        "Indian cuisine, very narrow 350 +/- 50 band, 4 days. No Indian recipe "
-        "sits inside 300-400, so every day is an out-of-band flagged pick.",
-        ["tight-band", "flagging", "edge"],
+        "Indian cuisine, low 350 target with nutritional goal (tight 275-425 "
+        "band), 4 days. No Indian recipe sits inside 275-425, so every day is "
+        "an out-of-band flagged pick.",
+        ["tight-band", "flagging", "nutritional", "edge"],
         stock(["in_dal_tadka", "in_aloo_gobi"], mult=2.0),
-        req("indian", 350, 50, 4, veg=False),
+        req("indian", 350, 4, goal="nutritional", veg=False),
         {
             "all_cuisine_match": True,
             "all_within_calorie_band": False,
             "every_day_flagged_out_of_band": True,
             "days_returned": 4,
-            "notes": "Lowest Indian recipe is aloo gobi at 440 (>400), so no "
-            "day can satisfy the band. Per spec there is no reject-and-retry: "
-            "pick the 4 closest (aloo gobi 440, dal 470, chana 520, paneer "
-            "wrap 540) and flag each as out-of-band.",
+            "notes": "Nutritional goal -> 350 +/- 75 = 275-425. Lowest Indian "
+            "recipe is aloo gobi at 440 (>425), so no day can satisfy the "
+            "band. Per spec there is no reject-and-retry: pick the 4 closest "
+            "(aloo gobi 440, dal 470, chana 520, paneer wrap 540) and flag "
+            "each as out-of-band.",
         },
     ),
     # ============================================================= key case 4
@@ -139,7 +155,7 @@ FIXTURES = [
         "but only 6 eligible vegetarian American recipes exist.",
         ["vegetarian", "exhaustion", "edge"],
         {"onion": 60, "cheddar": 50, "black_beans": 80},
-        req("american", 550, 150, 7, veg=True),
+        req("american", 550, 7, goal="general", veg=True),
         {
             "all_vegetarian": True,
             "no_non_vegetarian_selected": True,
@@ -157,7 +173,7 @@ FIXTURES = [
         "coverage is 0 everywhere, everything lands on the shopping list.",
         ["empty", "sparse", "edge"],
         {},
-        req("italian", 600, 150, 3, veg=False),
+        req("italian", 600, 3, goal="general", veg=False),
         {
             "low_pantry_coverage": True,
             "all_pantry_coverage_zero": True,
@@ -181,7 +197,7 @@ FIXTURES = [
             ],
             mult=3.0,
         ),
-        req("italian", 700, 150, 4, veg=False),
+        req("italian", 700, 4, goal="general", veg=False),
         {
             "all_cuisine_match": True,
             "high_pantry_coverage": True,
@@ -206,7 +222,7 @@ FIXTURES = [
             ],
             mult=3.0,
         ),
-        req("indian", 500, 150, 5, veg=True),
+        req("indian", 500, 5, goal="general", veg=True),
         {
             "all_vegetarian": True,
             "all_cuisine_match": True,
@@ -229,7 +245,7 @@ FIXTURES = [
             ],
             mult=3.0,
         ),
-        req("chinese", 600, 150, 4, veg=False),
+        req("chinese", 600, 4, goal="general", veg=False),
         {
             "all_cuisine_match": True,
             "high_pantry_coverage": True,
@@ -252,7 +268,7 @@ FIXTURES = [
             ],
             mult=3.0,
         ),
-        req("american", 550, 150, 4, veg=True),
+        req("american", 550, 4, goal="general", veg=True),
         {
             "all_vegetarian": True,
             "all_cuisine_match": True,
@@ -276,7 +292,7 @@ FIXTURES = [
             ],
             mult=3.0,
         ),
-        req(["italian", "indian"], 550, 150, 5, veg=True),
+        req(["italian", "indian"], 550, 5, goal="general", veg=True),
         {
             "all_vegetarian": True,
             "all_cuisine_match": True,
@@ -287,18 +303,21 @@ FIXTURES = [
     ),
     fixture(
         "11_narrow_band_american_exact",
-        "American, very tight 700 +/- 20 band, 2 days. Cheeseburger hits 700 "
-        "exactly (delta 0); day 2 must fall back to closest calorie.",
-        ["tight-band", "exact-match", "fallback", "edge"],
+        "American, 700 target with nutritional goal (625-775 band), 2 days. "
+        "Cheeseburger hits 700 exactly (delta 0); mac and cheese (650) is also "
+        "in band, so both days stay in band with no fallback.",
+        ["nutritional", "exact-match", "in-band", "edge"],
         stock(["am_classic_cheeseburger", "am_mac_and_cheese"], mult=2.0),
-        req("american", 700, 20, 2, veg=False),
+        req("american", 700, 2, goal="nutritional", veg=False),
         {
             "all_cuisine_match": True,
+            "all_within_calorie_band": True,
             "exact_calorie_match_day_exists": True,
-            "at_least_one_fallback": True,
+            "fallback_flags": False,
             "days_returned": 2,
-            "notes": "Only the cheeseburger (700) is in 680-720. Day 1 delta=0; "
-            "day 2 closest is mac and cheese (650, delta -50), flagged.",
+            "notes": "Nutritional goal -> 700 +/- 75 = 625-775. Cheeseburger "
+            "(700, delta 0) and mac and cheese (650, delta -50) are both in "
+            "band. Exercises an exact delta=0 match with no fallback needed.",
         },
     ),
     fixture(
@@ -311,7 +330,7 @@ FIXTURES = [
             mult=3.0,
             drop=("olive_oil", "garlic", "mozzarella", "parsley"),
         ),
-        req("italian", 550, 150, 3, veg=False),
+        req("italian", 550, 3, goal="general", veg=False),
         {
             "all_cuisine_match": True,
             "partial_pantry_coverage": True,
@@ -326,7 +345,7 @@ FIXTURES = [
         "600 kcal, 3 days. Full jars, near-zero coverage.",
         ["mismatch", "edge"],
         stock(["in_chana_masala", "in_butter_chicken", "in_palak_paneer"], mult=4.0),
-        req("italian", 600, 150, 3, veg=False),
+        req("italian", 600, 3, goal="general", veg=False),
         {
             "all_cuisine_match": True,
             "low_pantry_coverage": True,
@@ -341,7 +360,7 @@ FIXTURES = [
         "Single-day plan, Chinese, 500 kcal. Minimum-days edge.",
         ["min-days", "edge"],
         stock(["cn_vegetable_fried_rice"], mult=3.0),
-        req("chinese", 500, 150, 1, veg=False),
+        req("chinese", 500, 1, goal="general", veg=False),
         {
             "all_cuisine_match": True,
             "days_returned": 1,
@@ -356,7 +375,7 @@ FIXTURES = [
         "list nearly empty.",
         ["well-stocked", "full-coverage", "happy-path"],
         stock([r.recipe_id for r in RECIPES], mult=5.0),
-        req("italian", 600, 150, 5, veg=False),
+        req("italian", 600, 5, goal="general", veg=False),
         {
             "all_cuisine_match": True,
             "high_pantry_coverage": True,
@@ -367,22 +386,24 @@ FIXTURES = [
     ),
     fixture(
         "16_veg_tight_band_indian",
-        "Vegetarian Indian with a tight 450 +/- 30 band, 4 days. Combines the "
-        "hard veg gate with band flagging.",
-        ["vegetarian", "tight-band", "edge"],
+        "Vegetarian Indian with a nutritional goal (tight 375-525 band), 4 "
+        "days. Combines the hard veg gate with band flagging.",
+        ["vegetarian", "tight-band", "nutritional", "edge"],
         stock(
             ["in_dal_tadka", "in_aloo_gobi", "in_chana_masala", "in_palak_paneer"],
             mult=3.0,
         ),
-        req("indian", 450, 30, 4, veg=True),
+        req("indian", 450, 4, goal="nutritional", veg=True),
         {
             "all_vegetarian": True,
             "all_cuisine_match": True,
             "all_within_calorie_band": False,
             "some_days_flagged_out_of_band": True,
             "days_returned": 4,
-            "notes": "Only dal (470) and aloo gobi (440) sit in 420-480; the "
-            "other 2 veg days are flagged out-of-band but stay vegetarian.",
+            "notes": "Nutritional goal -> 450 +/- 75 = 375-525. Aloo gobi "
+            "(440), dal (470), and chana (520) sit in band; the 4th veg day "
+            "(palak 560 / biryani 590 / paneer wrap 540) is flagged "
+            "out-of-band but stays vegetarian.",
         },
     ),
     fixture(
@@ -391,7 +412,7 @@ FIXTURES = [
         "non-Chinese cuisine for variety.",
         ["sparse", "edge"],
         {"rice": 200, "onion": 60, "garam_masala": 15},
-        req("indian", 500, 150, 4, veg=False),
+        req("indian", 500, 4, goal="general", veg=False),
         {
             "low_pantry_coverage": True,
             "all_cuisine_match": True,
@@ -402,8 +423,9 @@ FIXTURES = [
     ),
     fixture(
         "18_american_family_pantry",
-        "Well-stocked American family pantry; 650 kcal, 5 days, no restriction.",
-        ["well-stocked", "omnivore", "happy-path"],
+        "Well-stocked American family pantry; 650 kcal, 5 days, kids goal (wide "
+        "band), no restriction.",
+        ["well-stocked", "omnivore", "kids", "happy-path"],
         stock(
             [
                 "am_classic_cheeseburger",
@@ -414,19 +436,22 @@ FIXTURES = [
             ],
             mult=3.0,
         ),
-        req("american", 650, 150, 5, veg=False),
+        req("american", 650, 5, goal="kids", veg=False),
         {
             "all_cuisine_match": True,
             "high_pantry_coverage": True,
             "days_returned": 5,
-            "notes": "Mix of meat, fish, and cheese mains inside 500-800.",
+            "notes": "Kids goal -> 650 +/- 200 = 450-850; every American main "
+            "fits, so the wide band keeps all 5 days in band. Exercises the "
+            "kids goal band.",
         },
     ),
     fixture(
         "19_low_target_veg_italian",
-        "Vegetarian Italian with a low 400 +/- 80 target, 3 days. Pushes the "
-        "scorer toward lighter dishes (salad, soup).",
-        ["vegetarian", "low-calorie", "edge"],
+        "Vegetarian Italian with a low 400 target and nutritional goal "
+        "(325-475 band), 3 days. Pushes the scorer toward lighter dishes "
+        "(salad, soup).",
+        ["vegetarian", "low-calorie", "nutritional", "edge"],
         stock(
             [
                 "it_caprese_farro_salad",
@@ -435,13 +460,14 @@ FIXTURES = [
             ],
             mult=3.0,
         ),
-        req("italian", 400, 80, 3, veg=True),
+        req("italian", 400, 3, goal="nutritional", veg=True),
         {
             "all_vegetarian": True,
             "all_cuisine_match": True,
             "days_returned": 3,
-            "notes": "Caprese (470) and Tuscan bean soup (430) fall in 320-480; "
-            "the 3rd day flags out-of-band but stays vegetarian.",
+            "notes": "Nutritional goal -> 400 +/- 75 = 325-475. Caprese (470) "
+            "and Tuscan bean soup (430) fall in band; the 3rd day flags "
+            "out-of-band but stays vegetarian.",
         },
     ),
     fixture(
@@ -464,7 +490,7 @@ FIXTURES = [
             "basil": 20,
             "parsley": 20,
         },
-        req("italian", 600, 150, 4, veg=False),
+        req("italian", 600, 4, goal="general", veg=False),
         {
             "all_cuisine_match": True,
             "mixed_pantry_coverage": True,
@@ -492,7 +518,7 @@ FIXTURES = [
             "cooking_oil": 300,     # olive_oil vs generic
             "unknown_jar": 250,     # unidentified
         },
-        req("italian", 600, 150, 3, veg=False),
+        req("italian", 600, 3, goal="general", veg=False),
         {
             "low_pantry_coverage": True,
             "unrecognized_items_ignored": True,
@@ -520,7 +546,7 @@ FIXTURES = [
             "misc_vegetable": 200,
             "half_eaten_thing": 150,
         },
-        req("italian", 600, 150, 4, veg=False),
+        req("italian", 600, 4, goal="general", veg=False),
         {
             "partial_pantry_coverage": True,
             "unrecognized_items_ignored": True,
@@ -544,7 +570,7 @@ FIXTURES = [
             "fresh_ginger": 30,   # should be ginger
             "bell_peppers": 150,  # plural; should be bell_pepper
         },
-        req("chinese", 550, 150, 3, veg=False),
+        req("chinese", 550, 3, goal="general", veg=False),
         {
             "low_pantry_coverage": True,
             "unrecognized_items_ignored": True,

@@ -1,9 +1,10 @@
 {
   "id": "16_veg_tight_band_indian",
-  "description": "Vegetarian Indian with a tight 450 +/- 30 band, 4 days. Combines the hard veg gate with band flagging.",
+  "description": "Vegetarian Indian with a nutritional goal (tight 375-525 band), 4 days. Combines the hard veg gate with band flagging.",
   "tags": [
     "vegetarian",
     "tight-band",
+    "nutritional",
     "edge"
   ],
   "pantry": {
@@ -30,10 +31,10 @@
     "cuisines": [
       "indian"
     ],
-    "calorie_target": 450,
-    "calorie_tolerance": 30,
+    "dinner_calorie_target": 450,
     "days": 4,
-    "vegetarian_required": true
+    "vegetarian_required": true,
+    "goal": "nutritional"
   },
   "expect": {
     "all_vegetarian": true,
@@ -41,6 +42,6 @@
     "all_within_calorie_band": false,
     "some_days_flagged_out_of_band": true,
     "days_returned": 4,
-    "notes": "Only dal (470) and aloo gobi (440) sit in 420-480; the other 2 veg days are flagged out-of-band but stay vegetarian."
+    "notes": "Nutritional goal -> 450 +/- 75 = 375-525. Aloo gobi (440), dal (470), and chana (520) sit in band; the 4th veg day (palak 560 / biryani 590 / paneer wrap 540) is flagged out-of-band but stays vegetarian."
   }
 }
