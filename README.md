@@ -107,18 +107,28 @@ list.
 
 Current state:
 
-| File | Purpose | Status |
-|---|---|---|
-| [schemas.py](schemas.py) | Core Pydantic models | done |
-| [recipes.py](recipes.py) | 40-recipe corpus, 10 per cuisine, >=4 vegetarian each | done |
-| [generate_fixtures.py](generate_fixtures.py) | Builds eval fixtures from the corpus | done |
-| [fixtures/](fixtures/) | 23 eval scenarios (see [fixtures/README.md](fixtures/README.md)) | done |
-| `vision_parse.py` | OpenAI vision call -> `PantryItem[]` | todo |
-| `retrieval.py` | Pinecone index build + per-day query | todo |
-| `memory.py` | Thin persistence wrapper | todo |
-| `planner.py` | Scoring + day loop + aggregation + shopping-list diff | todo |
-| `main.py` | CLI entrypoint | todo |
-| `eval/run_eval.py` | Fixture scenarios + assertions | todo |
+Module ownership follows the implementation blueprint (P1 vision/schemas, P2
+corpus/retrieval, P3 planner/inventory, P4 UI/evals).
+
+| File | Purpose | Owner | Status |
+|---|---|---|---|
+| [schemas.py](schemas.py) | Core Pydantic contracts | P1 | done |
+| [config.py](config.py) | Score weights, goal->band mapping, settings | shared | done |
+| [recipes.py](recipes.py) | 40-recipe corpus, 10 per cuisine, >=4 vegetarian each | P2 | done |
+| [repository.py](repository.py) | Recipe corpus loading + id lookup | shared | done |
+| [generate_fixtures.py](generate_fixtures.py) | Builds eval fixtures from the corpus | P4 | done |
+| [fixtures/](fixtures/) | 23 eval scenarios (see [fixtures/README.md](fixtures/README.md)) | P1/P4 | done |
+| [constraints.py](constraints.py) | Hard eligibility (vegetarian gate) | P3 | done |
+| [scoring.py](scoring.py) | Score components + stable tie-break | P3 | done |
+| [inventory.py](inventory.py) | Pantry depletion + shopping-list reconciliation | P3 | done |
+| [pipeline.py](pipeline.py) | Fixed N-day loop + aggregation | P3 | done |
+| [tests/](tests/) | Planner invariant + scenario tests | P3 | done |
+| `vision.py` | OpenAI vision call -> `PantryParseResult` | P1 | todo |
+| `normalization.py` | Aliases -> canonical ingredient ids | P1 | todo |
+| `retrieval.py` | Retriever protocol + local/Pinecone adapters | P2 | todo |
+| `explanations.py` | Evidence -> grounded reason text | P4 | todo |
+| `app.py` | Streamlit UI | P4 | todo |
+| `evals/run_eval.py` | Fixture suite -> `EvaluationSummary` | P4 | todo |
 
 The PRD calls for `recipes.json`; this repo uses [recipes.py](recipes.py)
 instead (typed `Recipe` objects, directly importable, no parse step). The

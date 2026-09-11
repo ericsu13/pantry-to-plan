@@ -12,20 +12,15 @@ Writes ~20 JSON files to fixtures/.
 import json
 import os
 
+from config import GOAL_CALORIE_TOLERANCE
 from recipes import RECIPES
 
 AS_OF = "2026-09-11"  # matches the demo's fixed "today"; not a real plan date
 OUT_DIR = os.path.join(os.path.dirname(__file__), "fixtures")
 
 # Calorie tolerance band (+/- kcal) is derived from the request `goal`, not set
-# per-request. The planner MUST use this same mapping when it scores the band;
-# it is duplicated here only so fixtures can document the derived band in their
-# notes. Keep the two in sync (move to a shared module once planner.py exists).
-GOAL_CALORIE_TOLERANCE = {
-    "general": 150,       # everyday cooking, generous band
-    "nutritional": 75,    # health-focused, tighter band
-    "kids": 200,          # kid-friendly, widest band
-}
+# per-request. GOAL_CALORIE_TOLERANCE lives in config.py so the planner and
+# these fixtures share one source of truth.
 
 by_id = {r.recipe_id: r for r in RECIPES}
 
