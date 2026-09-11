@@ -7,6 +7,8 @@ join key across pantry, recipes, and the shopping list.
 Models are ordered so that every referenced type is defined before it is used.
 """
 
+from typing import Optional
+
 from pydantic import BaseModel
 
 
@@ -14,30 +16,30 @@ from pydantic import BaseModel
 class PantryItem(BaseModel):
     ingredient_id: str
     display_name: str
-    quantity_g: float | None = None
+    quantity_g: Optional[float] = None
     confidence: float
-    source_text: str | None = None
+    source_text: Optional[str] = None
 
 
 class RecipeIngredient(BaseModel):
     ingredient_id: str
     quantity_g: float
-    display_name: str | None = None
+    display_name: Optional[str] = None
 
 
 class ShoppingListItem(BaseModel):
     ingredient_id: str
     quantity_g: float                        # grams still short after depletion
-    aisle: str | None = None                 # grocery aisle group for the UI
-    display_name: str | None = None
+    aisle: Optional[str] = None              # grocery aisle group for the UI
+    display_name: Optional[str] = None
     contributing_recipe_ids: list[str] = []  # planned recipes that drove the need
 
 
 class TraceEvent(BaseModel):
     step: str                    # e.g. "retrieve", "score", "select", "deplete"
-    day: int | None = None       # 1..N when the event is day-scoped
+    day: Optional[int] = None    # 1..N when the event is day-scoped
     message: str
-    data: dict | None = None
+    data: Optional[dict] = None
 
 
 class CandidateScore(BaseModel):
@@ -59,9 +61,9 @@ class AppIssue(BaseModel):
 
     code: str
     message: str
-    field: str | None = None
+    field: Optional[str] = None
     recoverable: bool
-    suggested_action: str | None = None
+    suggested_action: Optional[str] = None
 
 
 class RecipeCandidate(BaseModel):
@@ -89,7 +91,7 @@ class Shortage(BaseModel):
 
     ingredient_id: str
     quantity_g: float
-    aisle: str | None = None
+    aisle: Optional[str] = None
     contributing_recipe_ids: list[str] = []
 
 
@@ -101,7 +103,7 @@ class Recipe(BaseModel):
     calories_per_serving: int
     vegetarian: bool
     ingredients: list[RecipeIngredient]
-    cook_time_min: int | None = None
+    cook_time_min: Optional[int] = None
 
 
 class DayPlan(BaseModel):
@@ -112,7 +114,7 @@ class DayPlan(BaseModel):
     pantry_coverage: float       # fraction of ingredients already on hand
     vegetarian_required: bool    # request-level hard constraint
     fallback: bool = False       # picked on closest-calorie fallback, flagged
-    score: CandidateScore | None = None
+    score: Optional[CandidateScore] = None
     flags: list[str] = []        # constraint misses, e.g. "calorie_out_of_band"
 
 
@@ -120,7 +122,7 @@ class DayPlan(BaseModel):
 class PantryParseResult(BaseModel):
     items: list[PantryItem]
     warnings: list[str] = []
-    model_latency_ms: int | None = None
+    model_latency_ms: Optional[int] = None
 
 
 class PantryState(BaseModel):
@@ -134,7 +136,7 @@ class PantryState(BaseModel):
     """
 
     items: list[PantryItem]
-    as_of: str | None = None     # fixed demo date, not a real plan date
+    as_of: Optional[str] = None  # fixed demo date, not a real plan date
 
 
 class PlanningRequest(BaseModel):

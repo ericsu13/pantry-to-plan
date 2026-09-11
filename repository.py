@@ -7,6 +7,8 @@ recipes.py. A future version can back it with data/recipes.json and add aisle
 metadata without changing callers.
 """
 
+from typing import Optional
+
 from recipes import RECIPES
 from schemas import Recipe
 
@@ -21,7 +23,7 @@ def recipes_by_id() -> dict[str, Recipe]:
     return dict(_BY_ID)
 
 
-def get_recipe(recipe_id: str) -> Recipe | None:
+def get_recipe(recipe_id: str) -> Optional[Recipe]:
     """Resolve a recipe_id to its authoritative Recipe, or None if unknown.
 
     An unknown id from retrieval is an error to be reported (UNKNOWN_RECIPE_ID),
