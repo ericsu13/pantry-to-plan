@@ -93,9 +93,12 @@ targets, allergies, per-meal dietary constraints, per-day target variation.
 
 ## Data model
 
-See [schemas.py](schemas.py) (Pydantic models): `PantryItem`,
-`PantryParseResult`, `PlanningRequest`, `Recipe`, `DayPlan`, `CandidateScore`,
-`ShoppingListItem`, `PlanResult`. Everything is normalized to grams; unit
+See [schemas.py](schemas.py) (Pydantic models, frozen shared contracts per the
+implementation blueprint): `PantryItem`, `PantryParseResult`, `PantryState`,
+`PlanningRequest`, `Recipe`, `RecipeIngredient`, `RecipeCandidate`,
+`CandidateScore`, `EligibilityResult`, `DayPlan`, `Shortage`,
+`ShoppingListItem`, `AppIssue`, `PlanResult`, and the eval types
+(`CaseEvaluation`, `EvaluationSummary`). Everything is normalized to grams; unit
 conversion is out of scope. Ingredient ids are lowercase snake_case (e.g.
 `chicken_breast`) and are the join key across pantry, recipes, and shopping
 list.
@@ -141,7 +144,7 @@ Planned assertions (mechanical, not subjective):
   exactly.
 - Pantry never goes negative across day mutations.
 - The final shopping list lists only ingredients still short, with
-  `grams_needed > 0`.
+  `quantity_g > 0`.
 
 ## Build order
 

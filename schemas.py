@@ -27,8 +27,10 @@ class RecipeIngredient(BaseModel):
 
 class ShoppingListItem(BaseModel):
     ingredient_id: str
-    grams_needed: float
+    quantity_g: float                        # grams still short after depletion
+    aisle: str | None = None                 # grocery aisle group for the UI
     display_name: str | None = None
+    contributing_recipe_ids: list[str] = []  # planned recipes that drove the need
 
 
 class TraceEvent(BaseModel):
@@ -41,12 +43,54 @@ class TraceEvent(BaseModel):
 class CandidateScore(BaseModel):
     recipe_id: str
     eligible: bool
-    reject_reasons: list[str]
+    reject_reasons: list[str]    # frozen contract keeps this list[str]
     cuisine_score: float
     calorie_delta: int
     pantry_coverage: float
     repeat_penalty: float
     total_score: float
+
+
+class AppIssue(BaseModel):
+    """Structured error/warning shared across modules (see the blueprint's
+    error-code table: INVALID_IMAGE, NO_ELIGIBLE_RECIPE, ...). Used for
+    eligibility rejections and dependency/pipeline failures. The frozen
+    CandidateScore.reject_reasons and PlanResult.warnings stay list[str]."""
+
+    code: str
+    message: str
+    field: str | None = None
+    recoverable: bool
+    suggested_action: str | None = None
+
+
+class RecipeCandidate(BaseModel):
+    """Retriever output: a recipe reference plus its retrieval score. Exact
+    recipe facts are always resolved from the corpus, never from the
+    retriever; an unknown recipe_id is an error, not a generatable recipe."""
+
+    recipe_id: str
+    retrieval_score: float
+
+
+class EligibilityResult(BaseModel):
+    """constraints.validate_eligibility output. Eligibility runs before scoring
+    and again before a DayPlan is appended; the vegetarian gate is never
+    relaxed."""
+
+    recipe_id: str
+    eligible: bool
+    reject_reasons: list[AppIssue] = []
+
+
+class Shortage(BaseModel):
+    """inventory.apply_recipe output: unmet demand for one ingredient after
+    depleting the pantry for a selected recipe."""
+
+    ingredient_id: str
+    quantity_g: float
+    aisle: str | None = None
+    contributing_recipe_ids: list[str] = []
 
 
 # ------------------------------------------------------------------ composite
@@ -79,6 +123,20 @@ class PantryParseResult(BaseModel):
     model_latency_ms: int | None = None
 
 
+class PantryState(BaseModel):
+    """The confirmed pantry the planner operates on.
+
+    Distinct from PantryParseResult: that is raw vision output (with confidence
+    and source text) awaiting user confirmation; this is the authoritative
+    "what is true now" state the pipeline threads through each day, depleting
+    quantities as recipes are applied. Items reuse PantryItem so state flows
+    unchanged into PlanResult.final_pantry.
+    """
+
+    items: list[PantryItem]
+    as_of: str | None = None     # fixed demo date, not a real plan date
+
+
 class PlanningRequest(BaseModel):
     cuisines: list[str]
     dinner_calorie_target: int
@@ -92,5 +150,23 @@ class PlanResult(BaseModel):
     day_plans: list[DayPlan]
     final_pantry: list[PantryItem]
     shopping_list: list[ShoppingListItem]
-    warnings: list[str]
+    warnings: list[str]          # frozen contract; use AppIssue codes as strings
     trace: list[TraceEvent]
+
+
+# ------------------------------------------------------------------ evaluation
+# Person 4's eval contract, drafted from the blueprint's run_eval example.
+# Fields may firm up when the eval harness lands; checks/metrics stay open dicts
+# so new assertions don't force a schema change.
+class CaseEvaluation(BaseModel):
+    case_id: str
+    passed: bool
+    checks: dict = {}       # e.g. schema_valid, vegetarian_violation_count
+    metrics: dict = {}       # e.g. retrieval_recall_at_5, latency_ms, model_calls
+
+
+class EvaluationSummary(BaseModel):
+    cases: list[CaseEvaluation]
+    passed: int
+    failed: int
+    metrics: dict = {}       # rolled-up latency/cost/recall across cases
