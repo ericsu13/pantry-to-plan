@@ -6,8 +6,17 @@ partial). The Retriever is injected so unit tests can pass a deterministic fake.
 
 Per day:
   retrieve top-k -> resolve to corpus recipes -> score all (for the trace) ->
-  keep eligible + in requested cuisine + unused -> pick best by tie-break ->
+  keep eligible + in requested cuisine + unused -> sample one by score ->
   flag if outside the calorie band (fallback) -> apply to pantry -> record.
+
+Selection is probabilistic by default (config.SELECTION_TEMPERATURE): among the
+already-eligible candidates the pick is sampled with probability proportional
+to exp(total_score / T), so the same pantry produces varied plans on re-runs
+while still favoring the best-scoring recipes. Pass an entropy-seeded rng (the
+default) for that variety, a seeded random.Random for reproducibility, or
+temperature=0 to collapse to the deterministic tie-break (what evals pin). The
+hard constraints are untouched: sampling only ever chooses among candidates
+that already passed the vegetarian gate, cuisine scope, and used-exclusion.
 
 Cuisine handling (see module note below): candidates are scoped to the
 requested cuisine(s). A cuisine with no unused eligible recipe left ends the
@@ -16,9 +25,10 @@ surfaces). The calorie band is soft: the closest in-cuisine recipe is picked
 and flagged rather than skipped.
 """
 
-from typing import Protocol
+import random
+from typing import Optional, Protocol
 
-from config import DEFAULT_TOP_K, calorie_band
+from config import DEFAULT_TOP_K, SELECTION_TEMPERATURE, calorie_band
 from inventory import apply_recipe, build_shopping_list
 from repository import get_recipe
 from schemas import (
@@ -30,7 +40,7 @@ from schemas import (
     RecipeCandidate,
     TraceEvent,
 )
-from scoring import rank, score_recipe
+from scoring import score_recipe, softmax_select
 
 
 class Retriever(Protocol):
@@ -47,7 +57,17 @@ def generate_plan(
     request: PlanningRequest,
     retriever: Retriever,
     top_k: int = DEFAULT_TOP_K,
+    *,
+    rng: Optional[random.Random] = None,
+    temperature: Optional[float] = None,
 ) -> PlanResult:
+    # Non-zero temperature by default => varied plans across re-runs. A caller
+    # (evals, reproducible demos) can pin behavior with a seeded rng and/or
+    # temperature=0. rng defaults to an entropy-seeded instance so unseeded
+    # re-runs genuinely differ.
+    temperature = SELECTION_TEMPERATURE if temperature is None else temperature
+    rng = rng if rng is not None else random.Random()
+
     low, high = calorie_band(request)
     initial = pantry.model_copy(deep=True)
     current = pantry.model_copy(deep=True)
@@ -106,7 +126,7 @@ def generate_plan(
             )
             break
 
-        chosen: CandidateScore = rank(selectable)[0]
+        chosen: CandidateScore = softmax_select(selectable, rng, temperature)
         recipe = get_recipe(chosen.recipe_id)
         out_of_band = not (low <= recipe.calories_per_serving <= high)
         flags = ["calorie_out_of_band"] if out_of_band else []
@@ -116,7 +136,12 @@ def generate_plan(
                 day=day,
                 message=f"selected {chosen.recipe_id}"
                 + (" (out of calorie band; flagged)" if out_of_band else ""),
-                data={"total_score": chosen.total_score, "calorie_delta": chosen.calorie_delta},
+                data={
+                    "total_score": chosen.total_score,
+                    "calorie_delta": chosen.calorie_delta,
+                    "temperature": temperature,
+                    "sampled_from": len(selectable),
+                },
             )
         )
 

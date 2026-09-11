@@ -63,7 +63,9 @@ For each day:
    score the eligible candidates in Python on: cuisine match (in/out), calorie
    distance from target, percentage of ingredients already in the pantry, and
    not already used this week.
-3. Pick the single best-scoring candidate. If nothing eligible matches the
+3. Sample one candidate from the eligible set, weighted by score (see
+   [Selection](#selection) below), so re-running the same pantry gives varied
+   plans that still favor the best matches. If nothing eligible matches the
    cuisine, fall back to the closest calorie match and flag it. There is no
    substitution logic, just a flag. Never fall back to a non-vegetarian recipe.
 4. Subtract the recipe's ingredients from the in-memory pantry, persist the
@@ -90,6 +92,26 @@ constraint and by how much.
 
 Cut for time (easy to bolt on later as more filter predicates): protein/carb/fat
 targets, allergies, per-meal dietary constraints, per-day target variation.
+
+## Selection
+
+The per-day pick is probabilistic by default. Among the candidates that already
+passed the hard constraints (vegetarian gate, requested cuisine, not yet used),
+the planner samples one with probability proportional to
+`exp(total_score / T)`, where `T` is `config.SELECTION_TEMPERATURE` (default
+`0.10`, overridable via the `SELECTION_TEMPERATURE` env var). The best-scoring
+recipes are still the most likely, but the same pantry yields different plans on
+re-runs instead of the identical list every time.
+
+Only the choice among already-eligible candidates is randomized; scoring,
+arithmetic, the vegetarian gate, cuisine scope, calorie-band flagging, and
+pantry depletion stay fully deterministic. Reproducibility is preserved for
+evals and demos two ways: pass `generate_plan(..., temperature=0)` to collapse
+to the deterministic tie-break (argmax), or pass a seeded
+`generate_plan(..., rng=random.Random(seed))` so a given seed always yields the
+same plan. The eval and invariant tests use `temperature=0`; a dedicated test
+class exercises the sampled path across many seeds and confirms no hard
+constraint is ever violated.
 
 ## Data model
 

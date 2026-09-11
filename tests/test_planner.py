@@ -12,6 +12,7 @@ required eval fixtures plus the fallback/exact-match cases.
 import glob
 import json
 import os
+import random
 import sys
 import unittest
 
@@ -57,8 +58,13 @@ def request_of(fx):
     return PlanningRequest(**fx["request"])
 
 
-def plan_fixture(fx):
-    return generate_plan(pantry_of(fx), request_of(fx), FakeRetriever())
+def plan_fixture(fx, *, rng=None, temperature=0.0):
+    # Deterministic argmax by default (temperature=0) so scenario/invariant
+    # tests pin the reproducible contract. Probabilistic behavior is exercised
+    # explicitly in ProbabilisticSelectionTests.
+    return generate_plan(
+        pantry_of(fx), request_of(fx), FakeRetriever(), rng=rng, temperature=temperature
+    )
 
 
 class InvariantTests(unittest.TestCase):
@@ -68,7 +74,9 @@ class InvariantTests(unittest.TestCase):
         for fx in all_fixtures():
             with self.subTest(fixture=fx["id"]):
                 req = request_of(fx)
-                result = generate_plan(pantry_of(fx), req, FakeRetriever())
+                result = generate_plan(
+                    pantry_of(fx), req, FakeRetriever(), temperature=0.0
+                )
 
                 # Never produce more days than requested.
                 self.assertLessEqual(len(result.day_plans), req.days)
@@ -113,7 +121,9 @@ class InvariantTests(unittest.TestCase):
         for fx in all_fixtures():
             with self.subTest(fixture=fx["id"]):
                 pantry = pantry_of(fx)
-                result = generate_plan(pantry, request_of(fx), FakeRetriever())
+                result = generate_plan(
+                    pantry, request_of(fx), FakeRetriever(), temperature=0.0
+                )
 
                 have = {i.ingredient_id: (i.quantity_g or 0.0) for i in pantry.items}
                 buy = {s.ingredient_id: s.quantity_g for s in result.shopping_list}
@@ -181,6 +191,55 @@ class ScenarioTests(unittest.TestCase):
         self.assertEqual(len(r.day_plans), 2)
         self.assertTrue(any(dp.calorie_delta == 0 for dp in r.day_plans))
         self.assertFalse(any(dp.fallback for dp in r.day_plans))
+
+
+class ProbabilisticSelectionTests(unittest.TestCase):
+    """The default sampler adds variety without breaking any hard constraint."""
+
+    def _ids(self, result):
+        return [dp.recipe.recipe_id for dp in result.day_plans]
+
+    def test_same_seed_is_reproducible(self):
+        # Non-zero temperature, but a pinned seed => identical plans. This is
+        # how evals stay reproducible while the app default stays varied.
+        fx = load_fixture("01_well_stocked_veg_italian")
+        a = plan_fixture(fx, rng=random.Random(123), temperature=0.5)
+        b = plan_fixture(fx, rng=random.Random(123), temperature=0.5)
+        self.assertEqual(self._ids(a), self._ids(b))
+
+    def test_different_seeds_produce_variety(self):
+        # Across many seeds a fixture with several eligible recipes must yield
+        # more than one distinct plan; otherwise selection is not probabilistic.
+        fx = load_fixture("01_well_stocked_veg_italian")
+        plans = {
+            tuple(self._ids(plan_fixture(fx, rng=random.Random(seed), temperature=0.5)))
+            for seed in range(30)
+        }
+        self.assertGreater(len(plans), 1)
+
+    def test_sampling_never_violates_invariants(self):
+        # Every seed must still respect the vegetarian gate, no-repeat rule,
+        # non-negative depletion, and never exceed the requested day count.
+        for fx in all_fixtures():
+            for seed in range(8):
+                with self.subTest(fixture=fx["id"], seed=seed):
+                    req = request_of(fx)
+                    r = plan_fixture(fx, rng=random.Random(seed), temperature=0.5)
+                    self.assertLessEqual(len(r.day_plans), req.days)
+                    ids = self._ids(r)
+                    self.assertEqual(len(ids), len(set(ids)))
+                    if req.vegetarian_required:
+                        self.assertTrue(all(dp.recipe.vegetarian for dp in r.day_plans))
+                    for item in r.final_pantry:
+                        self.assertGreaterEqual(item.quantity_g or 0.0, 0.0)
+
+    def test_veg_gate_holds_under_sampling(self):
+        # A vegetarian-required fixture must never sample a meat recipe, no
+        # matter the seed or how hot the temperature is.
+        fx = next(f for f in all_fixtures() if f["request"]["vegetarian_required"])
+        for seed in range(20):
+            r = plan_fixture(fx, rng=random.Random(seed), temperature=5.0)
+            self.assertTrue(all(dp.recipe.vegetarian for dp in r.day_plans))
 
 
 class ScoringTests(unittest.TestCase):

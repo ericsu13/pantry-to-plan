@@ -14,6 +14,9 @@ Stable tie-break (blueprint): highest total_score, then higher pantry_coverage,
 then smaller absolute calorie delta, then recipe_id ascending.
 """
 
+import math
+import random
+
 from config import SCORE_WEIGHTS
 from constraints import validate_eligibility
 from schemas import CandidateScore, PantryState, PlanningRequest, Recipe
@@ -76,3 +79,27 @@ def tie_break_key(score: CandidateScore) -> tuple:
 def rank(scores: list[CandidateScore]) -> list[CandidateScore]:
     """Stable, deterministic ordering; best candidate first."""
     return sorted(scores, key=tie_break_key)
+
+
+def softmax_select(
+    scores: list[CandidateScore],
+    rng: random.Random,
+    temperature: float,
+) -> CandidateScore:
+    """Pick one candidate, sampling by exp(total_score / temperature).
+
+    The candidates are ranked first, so both the argmax fallback and the
+    sampling order are stable for a given RNG seed regardless of input order.
+    With ``temperature <= 0`` (or a single candidate) this collapses to the
+    deterministic tie-break winner, which is what evals pin. Only the choice
+    among already-eligible candidates is randomized; the caller has already
+    applied the hard constraints.
+    """
+    ordered = rank(scores)
+    if temperature <= 0 or len(ordered) == 1:
+        return ordered[0]
+    top = ordered[0].total_score
+    # Subtract the max before exp() for numerical stability; weights stay in
+    # (0, 1] with the top candidate at 1.0.
+    weights = [math.exp((s.total_score - top) / temperature) for s in ordered]
+    return rng.choices(ordered, weights=weights, k=1)[0]

@@ -31,6 +31,16 @@ SCORE_WEIGHTS = {
 
 DEFAULT_TOP_K = 8         # candidate pool per day (blueprint default)
 
+# Selection temperature for the per-day pick. The planner samples among the
+# eligible, in-cuisine, unused candidates with probability proportional to
+# exp(total_score / T) instead of always taking the argmax, so the same pantry
+# yields varied (but still sensibly ranked) plans on re-runs. Higher T = more
+# variety; T <= 0 collapses to the deterministic tie-break (argmax), which is
+# what evals pin. Hard constraints (vegetarian gate, cuisine scope, calorie
+# band flagging, depletion) are unaffected: only the choice among already-valid
+# candidates is randomized.
+SELECTION_TEMPERATURE = 0.10
+
 
 def calorie_band(request: PlanningRequest) -> tuple[int, int]:
     """Inclusive (low, high) kcal band for a request, derived from its goal."""
@@ -51,6 +61,9 @@ class Settings:
             os.environ.get("USE_LLM_EXPLANATIONS", "false").lower() == "true"
         )
         self.score_weights = dict(SCORE_WEIGHTS)
+        self.selection_temperature = float(
+            os.environ.get("SELECTION_TEMPERATURE", SELECTION_TEMPERATURE)
+        )
 
 
 def load_settings() -> Settings:
