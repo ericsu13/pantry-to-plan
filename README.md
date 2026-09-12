@@ -351,8 +351,8 @@ Run one live request:
 
 ```bash
 export OPENAI_API_KEY="your-key"
-# Optional override; the default is gpt-5.6-luna.
-export OPENAI_VISION_MODEL="gpt-5.6-luna"
+# Optional override; the default is gpt-4o.
+export OPENAI_VISION_MODEL="gpt-4o"
 python examples/run_vision_live.py
 ```
 

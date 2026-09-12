@@ -2,7 +2,7 @@
 
 Prerequisites:
     export OPENAI_API_KEY="..."
-    # Optional: export OPENAI_VISION_MODEL="gpt-5.6-luna"
+    # Optional: export OPENAI_VISION_MODEL="gpt-4o"
     python examples/run_vision_live.py [optional-image-path]
 """
 

@@ -104,7 +104,7 @@ class OpenAIVisionProvider:
                 ) from exc
             client = OpenAI()
         self._client = client
-        self._model = model or os.getenv("OPENAI_VISION_MODEL", "gpt-5.6-luna")
+        self._model = model or os.getenv("OPENAI_VISION_MODEL", "gpt-4o")
 
     def extract(self, image_bytes: bytes, media_type: str) -> RawVisionResult:
         encoded = base64.b64encode(image_bytes).decode("ascii")

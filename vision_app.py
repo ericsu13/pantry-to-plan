@@ -46,7 +46,7 @@ with st.sidebar:
     mode = st.radio("Provider", ("Live OpenAI", "Mock demo"), index=0)
     threshold = st.slider("Low-confidence threshold", 0.0, 1.0, 0.75, 0.05)
     if mode == "Live OpenAI":
-        configured_model = os.getenv("OPENAI_VISION_MODEL", "gpt-5.6-luna")
+        configured_model = os.getenv("OPENAI_VISION_MODEL", "gpt-4o")
         st.caption(f"Model: `{configured_model}`")
         if not os.getenv("OPENAI_API_KEY"):
             st.warning("OPENAI_API_KEY is not configured in this terminal.")
