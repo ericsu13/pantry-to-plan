@@ -30,6 +30,25 @@ pantry photo  ->  preferences + vegetarian gate  ->  meal plan  ->  shopping lis
    is enabled, and prefers ingredients already on hand.
 4. See a shopping list of what is missing across the plan.
 
+## Running the UI
+
+```
+.venv/bin/pip install -r requirements.txt
+.venv/bin/streamlit run app.py
+```
+
+The UI ([app.py](app.py)) is a thin Streamlit wizard: upload a pantry photo (or
+click "Use the demo pantry"), confirm and adjust the parsed items, set
+preferences, then get a day-by-day plan and shopping list. All non-widget logic
+lives in [app_services.py](app_services.py); Streamlit only holds UI state and
+confirmed typed objects. Preferences load from `preferences.default.json` and
+persist to `preferences.json` (gitignored) when changed. Because `vision.py`
+(P1) and `retrieval.py` (P2) are not built yet, the app falls back to the demo
+pantry for the parse step and a local corpus retriever for planning, and
+auto-upgrades to the real modules once they land. The opt-in "smart planning"
+toggle uses the `LangChainPlannerAdvisor` when `OPENAI_API_KEY` is set and
+degrades to the deterministic planner otherwise.
+
 ## Architecture
 
 ![Technical solution architecture: OpenAI vision and embeddings, Pinecone retrieval, Python scoring in a per-day loop, and a thin persistence interface, producing day plans, a shopping list, and constraint flags](docs/pantry-to-plan-architecture.png)
@@ -176,11 +195,12 @@ corpus/retrieval, P3 planner/inventory, P4 UI/evals).
 | [pipeline.py](pipeline.py) | N-day loop (greedy default + agentic strategies) | P3 | done |
 | [advisor.py](advisor.py) | Injected LLM decider for agentic planning (+ fake) | P3 | done |
 | [tests/](tests/) | Planner invariant + scenario tests | P3 | done |
+| [app.py](app.py) | Streamlit wizard UI | P4 | done |
+| [app_services.py](app_services.py) | UI-supporting logic (prefs, pantry, run) | P4 | done |
 | `vision.py` | OpenAI vision call -> `PantryParseResult` | P1 | todo |
 | `normalization.py` | Aliases -> canonical ingredient ids | P1 | todo |
 | `retrieval.py` | Retriever protocol + local/Pinecone adapters | P2 | todo |
 | `explanations.py` | Evidence -> grounded reason text | P4 | todo |
-| `app.py` | Streamlit UI | P4 | todo |
 | `evals/run_eval.py` | Fixture suite -> `EvaluationSummary` | P4 | todo |
 
 The PRD calls for `recipes.json`; this repo uses [recipes.py](recipes.py)

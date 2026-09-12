@@ -1,5 +1,8 @@
 pydantic>=2,<3
 
+# Streamlit UI (app.py). The planner core and tests import fine without it.
+streamlit>=1.36,<2
+
 # Agentic planner (opt-in). Only needed for the live LangChainPlannerAdvisor;
 # the deterministic path and the fake-based tests import fine without these.
 # LangSmith tracing is intentionally not enabled, so langsmith is not required.
