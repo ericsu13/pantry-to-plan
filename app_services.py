@@ -13,6 +13,7 @@ works end to end in every environment.
 
 import json
 import os
+import random
 from pathlib import Path
 
 from config import ALL_CUISINES, GOAL_CALORIE_TOLERANCE
@@ -224,6 +225,29 @@ def manual_ingredient_row(name: str) -> dict:
         recipe_supported=normalized.recipe_supported,
     )
     return candidates_to_editor_rows([candidate])[0]
+
+
+# Demo-only quantity range: 50g to 500g inclusive, in 50g steps.
+_DEMO_QUANTITY_CHOICES = list(range(50, 501, 50))
+
+
+def fill_random_quantities(rows: list[dict], rng: random.Random | None = None) -> list[dict]:
+    """Return rows with any blank quantity filled by a random demo amount.
+
+    A convenience for demos: an uploaded photo often yields items with no
+    readable quantity, and this fills each blank with a random value between
+    50g and 500g (in 50g increments). Rows that already have a quantity are
+    left untouched, so a user's own edits are preserved. Pass a seeded rng for
+    reproducibility.
+    """
+    picker = rng or random
+    filled: list[dict] = []
+    for row in rows:
+        new_row = dict(row)
+        if new_row.get("quantity_g") in (None, ""):
+            new_row["quantity_g"] = float(picker.choice(_DEMO_QUANTITY_CHOICES))
+        filled.append(new_row)
+    return filled
 
 
 def pantry_from_rows(rows: list[dict]) -> PantryState:
