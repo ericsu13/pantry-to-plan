@@ -45,12 +45,23 @@ STEPS = ["Upload", "Pantry", "Preferences", "Plan"]
 st.set_page_config(page_title="Pantry to Plan", page_icon="🍅", layout="centered")
 
 ASSET_DIR = Path(__file__).parent / "assets" / "ui"
+RECIPE_IMAGE_DIR = Path(__file__).parent / "images"
 
 
 @st.cache_data(show_spinner=False)
 def _asset_uri(filename: str) -> str:
     """Return a local decorative PNG as an embeddable data URI."""
     encoded = base64.b64encode((ASSET_DIR / filename).read_bytes()).decode("ascii")
+    return f"data:image/png;base64,{encoded}"
+
+
+@st.cache_data(show_spinner=False)
+def _recipe_image_uri(recipe_title: str) -> str | None:
+    """Return the matching local recipe image, when one exists."""
+    image_path = RECIPE_IMAGE_DIR / f"{recipe_title}.png"
+    if not image_path.is_file():
+        return None
+    encoded = base64.b64encode(image_path.read_bytes()).decode("ascii")
     return f"data:image/png;base64,{encoded}"
 
 
@@ -272,6 +283,10 @@ hr { border-color: var(--pp-border) !important; }
 .pp-meal-visual::before {
   content: ''; position: absolute; width: 5rem; height: 5rem; border-radius: 50%;
   background: rgba(255,255,255,0.72); box-shadow: 0 8px 25px rgba(45,57,49,0.08);
+}
+.pp-meal-visual.has-image::before { display: none; }
+.pp-meal-image {
+  position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
 }
 .pp-meal-symbol { position: relative; font-size: 2rem; filter: saturate(0.8); }
 .pp-daytitle {
@@ -829,14 +844,26 @@ def _day_row(day_plan) -> None:
     recipe = day_plan.recipe
     with st.container(border=True):
         coverage = round(day_plan.pantry_coverage * 100)
+        image_uri = _recipe_image_uri(recipe.title)
+        if image_uri is not None:
+            visual = (
+                f"<div class='pp-meal-visual has-image'>"
+                f"<img class='pp-meal-image' src='{image_uri}' "
+                f"alt='{html.escape(recipe.title, quote=True)}'>"
+                f"<span class='pp-coverage'>✓ {coverage}% on hand</span></div>"
+            )
+        else:
+            visual = (
+                f"<div class='pp-meal-visual'><span class='pp-meal-symbol'>🍽️</span>"
+                f"<span class='pp-coverage'>✓ {coverage}% on hand</span></div>"
+            )
         dietary = "<span class='pp-badge neutral'>Vegetarian</span>" if recipe.vegetarian else ""
         cook_time = (
             f"<span>◷ {recipe.cook_time_min} min</span>" if recipe.cook_time_min is not None else ""
         )
         st.markdown(
-            f"<div class='pp-meal-visual'><span class='pp-meal-symbol'>🍽️</span>"
-            f"<span class='pp-coverage'>✓ {coverage}% on hand</span></div>"
-            f"<span class='pp-daykicker'>Day {day_plan.day}</span>"
+            visual
+            + f"<span class='pp-daykicker'>Day {day_plan.day}</span>"
             f"<div class='pp-daytitle'>{recipe.title}</div>"
             f"<div>{_badges_html(recipe.cuisine_tags, day_plan.flags)}{dietary}</div>"
             f"<div class='pp-meal-facts'>{cook_time}"
