@@ -33,6 +33,30 @@ FIXTURES_DIR = ROOT / "fixtures"
 DEMO_FIXTURE = FIXTURES_DIR / "01_well_stocked_veg_italian.json"
 PREFS_FILE = ROOT / "preferences.json"
 PREFS_DEFAULT_FILE = ROOT / "preferences.default.json"
+ENV_DEMO_FILE = ROOT / ".env.demo"
+
+
+def _load_env_demo() -> None:
+    """Load KEY=VALUE lines from .env.demo into the process environment so the
+    demo picks up OPENAI_API_KEY (and friends) without a shell export. Existing
+    environment values win, so a real export is never overridden. The file is
+    gitignored and never logged."""
+    if not ENV_DEMO_FILE.exists():
+        return
+    for raw in ENV_DEMO_FILE.read_text().splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+# Populate the environment from .env.demo at import so advisor_status() and the
+# live advisor see the supplied credentials.
+_load_env_demo()
 
 # Option lists sourced from the shared contract so the UI can never drift from
 # what the planner actually accepts.

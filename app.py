@@ -110,6 +110,18 @@ def reset_all() -> None:
 
 
 # ---------------------------------------------------------------- chrome
+def _reachable_steps() -> dict[int, bool]:
+    """Which steps the user may jump to. A step opens once its input exists, so
+    you can always backtrack to a completed step (and to any later step whose
+    prerequisite is already satisfied)."""
+    return {
+        1: True,
+        2: st.session_state.parse_result is not None,
+        3: st.session_state.pantry is not None,
+        4: st.session_state.plan is not None,
+    }
+
+
 def render_chrome(active: int) -> None:
     st.markdown(
         "<div class='pp-brand'>"
@@ -118,11 +130,24 @@ def render_chrome(active: int) -> None:
         "</div>",
         unsafe_allow_html=True,
     )
-    pills = []
+
+    # Clickable step pills: jump back to any completed step, or restart.
+    reachable = _reachable_steps()
+    cols = st.columns([1, 1, 1, 1, 0.9])
     for i, label in enumerate(STEPS, start=1):
-        cls = "active" if i == active else ("done" if i < active else "")
-        pills.append(f"<span class='pp-step {cls}'>{i}. {label}</span>")
-    st.markdown(f"<div class='pp-steps'>{''.join(pills)}</div>", unsafe_allow_html=True)
+        with cols[i - 1]:
+            if st.button(
+                f"{i}. {label}",
+                key=f"nav_{i}",
+                type="primary" if i == active else "secondary",
+                use_container_width=True,
+                disabled=(i != active and not reachable[i]),
+            ):
+                go_to(i)
+    with cols[-1]:
+        if st.button("↺ Restart", key="nav_restart", use_container_width=True):
+            reset_all()
+    st.markdown("<div style='margin-bottom: 1.2rem;'></div>", unsafe_allow_html=True)
 
 
 # ------------------------------------------------------------------- steps
@@ -252,7 +277,7 @@ def step_preferences() -> None:
     advisor_available, advisor_reason = svc.advisor_status()
     use_advisor = st.toggle(
         "Smart planning (agentic)",
-        value=False,
+        value=advisor_available,
         disabled=not advisor_available,
         help="Let a model shape the whole week and repair days that can't be filled. "
         "The deterministic core still enforces every constraint.",
