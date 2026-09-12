@@ -8,7 +8,9 @@ wraps). Session state holds only UI state and confirmed typed schema objects.
 Run it with:  .venv/bin/streamlit run app.py
 """
 
+import base64
 import time
+from pathlib import Path
 
 import streamlit as st
 from pydantic import ValidationError
@@ -42,6 +44,24 @@ STEPS = ["Upload", "Pantry", "Preferences", "Plan"]
 
 st.set_page_config(page_title="Pantry to Plan", page_icon="🍅", layout="centered")
 
+ASSET_DIR = Path(__file__).parent / "assets" / "ui"
+
+
+@st.cache_data(show_spinner=False)
+def _asset_uri(filename: str) -> str:
+    """Return a local decorative PNG as an embeddable data URI."""
+    encoded = base64.b64encode((ASSET_DIR / filename).read_bytes()).decode("ascii")
+    return f"data:image/png;base64,{encoded}"
+
+
+ASSETS = {
+    "brand_tomato": _asset_uri("brand-tomato.png"),
+    "upload_pantry": _asset_uri("upload-pantry.png"),
+    "upload_herbs_right": _asset_uri("upload-herbs-right.png"),
+    "pantry_jars": _asset_uri("pantry-jars.png"),
+    "preferences_basil": _asset_uri("preferences-basil.png"),
+}
+
 CSS = """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700&family=Inter:wght@400;500;600&display=swap');
@@ -70,7 +90,7 @@ CSS = """
     radial-gradient(circle at 92% 18%, rgba(47, 143, 91, 0.07), transparent 28rem),
     var(--pp-cream);
 }
-.block-container { max-width: 1040px; padding-top: 1.25rem; padding-bottom: 5rem; }
+.block-container { position: relative; max-width: 1040px; padding-top: 1.25rem; padding-bottom: 5rem; }
 
 html, body, [class*="css"] { font-family: 'Inter', sans-serif; color: var(--pp-ink); }
 h1, h2, h3, h4, .pp-brand-name, .pp-page-title {
@@ -91,16 +111,16 @@ p { line-height: 1.62; }
   padding: 0.15rem 0.6rem; margin-bottom: 0.12rem;
 }
 .pp-brand-name { font-size: 1.78rem; font-weight: 700; line-height: 1.2; }
+.pp-brand-tomato {
+  width: 1.75rem; height: 1.75rem; object-fit: contain; vertical-align: -0.28rem;
+  margin-right: 0.32rem;
+}
 .pp-brand-name .pp-dot { color: var(--pp-green); }
 .pp-tagline { color: var(--pp-muted); font-size: 0.78rem; letter-spacing: 0.06em; }
 .pp-brand-note {
   grid-column: 3; justify-self: end; max-width: 145px; color: var(--pp-tomato);
   font-family: 'Bradley Hand', 'Segoe Print', cursive; font-size: 1.05rem;
   line-height: 1.05; text-align: center; transform: rotate(-3deg); opacity: 0.88;
-}
-.pp-brand-leaf {
-  position: absolute; right: -0.4rem; bottom: -0.7rem; color: var(--pp-green);
-  font-size: 1.55rem; transform: rotate(-15deg); opacity: 0.28; pointer-events: none;
 }
 .pp-nav-label {
   color: #8a938d; font-size: 0.69rem; font-weight: 700; letter-spacing: 0.12em;
@@ -128,6 +148,31 @@ p { line-height: 1.62; }
   text-align: center; margin: 0.25rem 0 0.1rem;
 }
 .pp-upload-copy { color: var(--pp-muted); font-size: 0.82rem; text-align: center; margin-bottom: 0.8rem; }
+.pp-upload-pantry {
+  display: block; width: min(100%, 15rem); height: auto; margin: 0.5rem auto;
+  filter: drop-shadow(0 12px 16px rgba(61, 72, 63, 0.1));
+}
+.pp-upload-heading-art { position: relative; height: 0; pointer-events: none; }
+.pp-upload-heading-leaf {
+  position: absolute; right: 0.5rem; top: -8.2rem; width: 8.5rem; height: auto;
+  opacity: 0.9; z-index: 0; transform: rotate(-8deg);
+  filter: drop-shadow(0 8px 12px rgba(45, 65, 49, 0.1));
+}
+.pp-pantry-heading-art { position: relative; height: 0; pointer-events: none; }
+.pp-pantry-heading-leaf {
+  position: absolute; right: 0.5rem; top: -8.2rem; width: 8.5rem; height: auto;
+  opacity: 0.9; z-index: 0; transform: rotate(-8deg);
+  filter: drop-shadow(0 8px 12px rgba(45, 65, 49, 0.1));
+}
+.pp-pantry-jars {
+  position: absolute; right: 0.35rem; bottom: 0; width: 4.7rem; height: auto;
+  pointer-events: none;
+}
+.pp-preferences-art { position: relative; height: 0; pointer-events: none; }
+.pp-preferences-basil {
+  position: absolute; right: -5.5rem; top: -7.5rem; width: 10.5rem; height: auto;
+  z-index: 0; filter: drop-shadow(0 8px 12px rgba(45, 65, 49, 0.11));
+}
 
 /* Native Streamlit surfaces restyled as the shared card system. */
 [data-testid="stVerticalBlockBorderWrapper"] {
@@ -180,10 +225,11 @@ hr { border-color: var(--pp-border) !important; }
 .pp-how-title { font-family: 'Poppins', sans-serif; font-weight: 700; color: var(--pp-ink); }
 .pp-how-copy { color: var(--pp-muted); font-size: 0.82rem; margin-top: 0.15rem; }
 .pp-status-card {
-  display: flex; align-items: center; gap: 0.8rem; min-height: 4.15rem;
+  position: relative; display: flex; align-items: center; gap: 0.8rem; min-height: 4.15rem;
   padding: 0.75rem 0.95rem; border: 1px solid #dbe9df; border-radius: 14px;
   background: linear-gradient(135deg, #eff7f1, #e7f2e9);
 }
+.pp-status-card.with-art { padding-right: 5.1rem; }
 .pp-status-icon {
   display: grid; place-items: center; flex: 0 0 2.2rem; width: 2.2rem; height: 2.2rem;
   color: white; background: var(--pp-green); border-radius: 50%; font-size: 1rem;
@@ -255,10 +301,12 @@ hr { border-color: var(--pp-border) !important; }
   .pp-brand-name { font-size: 1.62rem; }
   .pp-brand-shell { grid-template-columns: 1fr; }
   .pp-brand { grid-column: 1; }
-  .pp-brand-note, .pp-brand-leaf { display: none; }
+  .pp-brand-note { display: none; }
   .pp-page-intro { margin-bottom: 1.1rem; }
   .pp-page-title { font-size: 2rem; }
   .pp-shop-row { align-items: flex-start; }
+  .pp-upload-heading-leaf, .pp-pantry-heading-leaf, .pp-preferences-basil { display: none; }
+  .pp-upload-pantry { width: min(70%, 12rem); }
   .stButton > button { padding-left: 0.45rem; padding-right: 0.45rem; font-size: 0.83rem; }
 }
 </style>
@@ -330,11 +378,11 @@ def render_chrome(active: int) -> None:
         "<div class='pp-brand-shell'>"
         "<div class='pp-brand'>"
         "<div class='pp-brand-mark'>"
-        "<div class='pp-brand-name'>🍅 Pantry to Plan<span class='pp-dot'>.</span></div>"
+        f"<div class='pp-brand-name'><img class='pp-brand-tomato' src='{ASSETS['brand_tomato']}' "
+        "alt='' aria-hidden='true'>Pantry to Plan<span class='pp-dot'>.</span></div>"
         "</div><div class='pp-tagline'>from shelf to supper</div>"
         "</div>"
         f"<div class='pp-brand-note'>{notes[active]}</div>"
-        "<div class='pp-brand-leaf'>🌿</div>"
         "</div>",
         unsafe_allow_html=True,
     )
@@ -378,27 +426,43 @@ def step_upload() -> None:
         "Let's see what you have!",
         "Upload a photo of your pantry or fridge and we'll identify your ingredients.",
     )
+    st.markdown(
+        f"<div class='pp-upload-heading-art'><img class='pp-upload-heading-leaf' "
+        f"src='{ASSETS['upload_herbs_right']}' alt='' aria-hidden='true'></div>",
+        unsafe_allow_html=True,
+    )
 
     with st.container(border=True):
-        st.markdown("<div class='pp-upload-icon'>↥</div>", unsafe_allow_html=True)
-        st.markdown(
-            "<div class='pp-upload-title'>Drop your pantry photo here</div>"
-            "<div class='pp-upload-copy'>PNG, JPG, or JPEG</div>",
-            unsafe_allow_html=True,
-        )
-        uploaded = st.file_uploader(
-            "Pantry photo", type=["png", "jpg", "jpeg"], label_visibility="collapsed"
-        )
-        if uploaded is not None:
-            st.image(uploaded, caption="Your pantry", use_container_width=True)
-
-        left, right = st.columns(2)
-        with left:
-            read = st.button(
-                "Read my pantry", type="primary", use_container_width=True, disabled=uploaded is None
+        art, controls = st.columns([0.78, 1.5], vertical_alignment="center")
+        with art:
+            st.markdown(
+                f"<img class='pp-upload-pantry' src='{ASSETS['upload_pantry']}' "
+                "alt='' aria-hidden='true'>",
+                unsafe_allow_html=True,
             )
-        with right:
-            demo = st.button("Use the demo pantry", use_container_width=True)
+        with controls:
+            st.markdown("<div class='pp-upload-icon'>↥</div>", unsafe_allow_html=True)
+            st.markdown(
+                "<div class='pp-upload-title'>Drop your pantry photo here</div>"
+                "<div class='pp-upload-copy'>PNG, JPG, or JPEG</div>",
+                unsafe_allow_html=True,
+            )
+            uploaded = st.file_uploader(
+                "Pantry photo", type=["png", "jpg", "jpeg"], label_visibility="collapsed"
+            )
+            if uploaded is not None:
+                st.image(uploaded, caption="Your pantry", use_container_width=True)
+
+            left, right = st.columns(2)
+            with left:
+                read = st.button(
+                    "Read my pantry",
+                    type="primary",
+                    use_container_width=True,
+                    disabled=uploaded is None,
+                )
+            with right:
+                demo = st.button("Use the demo pantry", use_container_width=True)
 
     if read and uploaded is not None:
         try:
@@ -454,6 +518,11 @@ def step_confirm() -> None:
         "Step 2 · Pantry",
         "Here's what we found",
         "Review your pantry items, adjust anything you need, then confirm.",
+    )
+    st.markdown(
+        f"<div class='pp-pantry-heading-art'><img class='pp-pantry-heading-leaf' "
+        f"src='{ASSETS['upload_herbs_right']}' alt='' aria-hidden='true'></div>",
+        unsafe_allow_html=True,
     )
     if st.session_state.source == "photo":
         st.caption(
@@ -525,17 +594,19 @@ def step_confirm() -> None:
         with summary_right:
             if flagged:
                 st.markdown(
-                    "<div class='pp-status-card review'><span class='pp-status-icon'>!</span>"
+                    "<div class='pp-status-card review with-art'><span class='pp-status-icon'>!</span>"
                     "<span><div class='pp-status-title'>Needs a quick look</div>"
                     "<div class='pp-status-copy'>Review the highlighted details below</div>"
+                    f"<img class='pp-pantry-jars' src='{ASSETS['pantry_jars']}' alt='' aria-hidden='true'>"
                     "</span></div>",
                     unsafe_allow_html=True,
                 )
             else:
                 st.markdown(
-                    "<div class='pp-status-card'><span class='pp-status-icon'>✓</span>"
+                    "<div class='pp-status-card with-art'><span class='pp-status-icon'>✓</span>"
                     "<span><div class='pp-status-title'>All set</div>"
                     "<div class='pp-status-copy'>You can still edit anything below</div>"
+                    f"<img class='pp-pantry-jars' src='{ASSETS['pantry_jars']}' alt='' aria-hidden='true'>"
                     "</span></div>",
                     unsafe_allow_html=True,
                 )
@@ -588,6 +659,11 @@ def step_preferences() -> None:
         "Step 3 · Preferences",
         "Make it yours",
         "Tell us what you like and we'll create a personalized meal plan.",
+    )
+    st.markdown(
+        f"<div class='pp-preferences-art'><img class='pp-preferences-basil' "
+        f"src='{ASSETS['preferences_basil']}' alt='' aria-hidden='true'></div>",
+        unsafe_allow_html=True,
     )
 
     with st.container(border=True):
