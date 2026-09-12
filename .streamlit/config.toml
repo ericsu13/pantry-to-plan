@@ -1,0 +1,11 @@
+# Pantry to Plan - "Fresh & warm" brand theme.
+[theme]
+base = "light"
+primaryColor = "#2f8f5b"
+backgroundColor = "#fbfaf6"
+secondaryBackgroundColor = "#ffffff"
+textColor = "#1f2a24"
+font = "sans serif"
+
+[browser]
+gatherUsageStats = false

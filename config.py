@@ -31,6 +31,20 @@ SCORE_WEIGHTS = {
 
 DEFAULT_TOP_K = 8         # candidate pool per day (blueprint default)
 
+# The four fixed cuisines (matches the corpus tags). Used by the agentic repair
+# loop to broaden retrieval when it crosses cuisines as a last resort.
+ALL_CUISINES = ["italian", "american", "chinese", "indian"]
+
+# ------------------------------------------------------------- agentic planner
+# Opt-in strategies (#3 whole-week planning, #1 relax-and-repair). Off unless a
+# PlannerAdvisor is injected into generate_plan; the default path stays the
+# deterministic greedy + probabilistic loop. The advisor only decides; the
+# deterministic core still does all scoring, gating, and arithmetic.
+WEEK_OBJECTIVES = ["minimize_shopping_list", "smart_depletion", "variety"]
+WEEK_POOL_TOP_K = 24         # candidate pool the week planner reasons over
+MAX_RELAXATION_ROUNDS = 4    # per-day cap on relax-and-repair rounds (bounds termination)
+ADVISOR_MODEL = "gpt-4o"     # OpenAI model for the live LangChain advisor (env-overridable)
+
 # Selection temperature for the per-day pick. The planner samples among the
 # eligible, in-cuisine, unused candidates with probability proportional to
 # exp(total_score / T) instead of always taking the argmax, so the same pantry
@@ -63,6 +77,17 @@ class Settings:
         self.score_weights = dict(SCORE_WEIGHTS)
         self.selection_temperature = float(
             os.environ.get("SELECTION_TEMPERATURE", SELECTION_TEMPERATURE)
+        )
+        # Agentic planner (opt-in). Off by default so a keyless fresh checkout
+        # runs the deterministic path and the fake-based tests.
+        self.agentic_enabled = (
+            os.environ.get("AGENTIC_ENABLED", "false").lower() == "true"
+        )
+        self.advisor_model = os.environ.get("ADVISOR_MODEL", ADVISOR_MODEL)
+        self.advisor_temperature = float(os.environ.get("ADVISOR_TEMPERATURE", "0.0"))
+        self.week_pool_top_k = int(os.environ.get("WEEK_POOL_TOP_K", WEEK_POOL_TOP_K))
+        self.max_relaxation_rounds = int(
+            os.environ.get("MAX_RELAXATION_ROUNDS", MAX_RELAXATION_ROUNDS)
         )
 
 

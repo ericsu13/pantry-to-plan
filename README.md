@@ -115,15 +115,20 @@ constraint is ever violated.
 
 ## Data model
 
-See [schemas.py](schemas.py) (Pydantic models, frozen shared contracts per the
-implementation blueprint): `PantryItem`, `PantryParseResult`, `PantryState`,
+See [schemas.py](schemas.py) (strict Pydantic models shared across modules):
+`PantryItemCandidate`, `PantryItem`, `PantryParseResult`, `PantryState`,
 `PlanningRequest`, `Recipe`, `RecipeIngredient`, `RecipeCandidate`,
 `CandidateScore`, `EligibilityResult`, `DayPlan`, `Shortage`,
 `ShoppingListItem`, `AppIssue`, `PlanResult`, and the eval types
 (`CaseEvaluation`, `EvaluationSummary`). Everything is normalized to grams; unit
 conversion is out of scope. Ingredient ids are lowercase snake_case (e.g.
 `chicken_breast`) and are the join key across pantry, recipes, and shopping
-list.
+list. The local recognition catalog currently contains 205 canonical IDs: all
+96 recipe ingredient IDs plus 109 commonly encountered foods.
+`PantryItemCandidate` is machine-proposed vision output;
+`PantryItem` inside `PantryState` is user-confirmed planner input. Models reject
+unknown fields and enforce quantity, confidence, coverage, day, and identifier
+bounds at module boundaries.
 
 ## Repository layout
 
@@ -144,9 +149,10 @@ corpus/retrieval, P3 planner/inventory, P4 UI/evals).
 | [scoring.py](scoring.py) | Score components + stable tie-break | P3 | done |
 | [inventory.py](inventory.py) | Pantry depletion + shopping-list reconciliation | P3 | done |
 | [pipeline.py](pipeline.py) | Fixed N-day loop + aggregation | P3 | done |
-| [tests/](tests/) | Planner invariant + scenario tests | P3 | done |
-| `vision.py` | OpenAI vision call -> `PantryParseResult` | P1 | todo |
-| `normalization.py` | Aliases -> canonical ingredient ids | P1 | todo |
+| [tests/](tests/) | Planner invariant, scenario, and schema-validation tests | P3/P1 | done |
+| [vision.py](vision.py) | Validated image -> raw detection -> `PantryParseResult` | P1 | done |
+| [normalization.py](normalization.py) | Raw labels -> corpus-backed ingredient IDs | P1 | done |
+| [vision_app.py](vision_app.py) | Independent upload, review, confirmation UI | P1 | done |
 | `retrieval.py` | Retriever protocol + local/Pinecone adapters | P2 | todo |
 | `explanations.py` | Evidence -> grounded reason text | P4 | todo |
 | `app.py` | Streamlit UI | P4 | todo |
@@ -160,7 +166,7 @@ retrieval index-build reads from it and writes the Pinecone metadata
 ## Eval
 
 Automated checks that the loop does what it claims, run against fixed fixtures
-directly against `planner.py` (no subprocess, no live vision call), so they are
+directly against `pipeline.py` (no subprocess, no live vision call), so they are
 cheap to run repeatedly. The [fixtures/](fixtures/) folder holds 23 scenarios
 covering the four required cases (well-stocked vegetarian, sparse pantry with
 fallback, tight calorie band, vegetarian exhaustion) plus happy paths, join
@@ -177,6 +183,14 @@ Planned assertions (mechanical, not subjective):
 - Pantry never goes negative across day mutations.
 - The final shopping list lists only ingredients still short, with
   `quantity_g > 0`.
+- Schema contracts reject malformed IDs, invalid confidence values,
+  contradictory eligibility results, and unexpected fields.
+
+Run the complete local suite from the repository root:
+
+```bash
+python -m unittest discover -s tests -v
+```
 
 ## Build order
 
@@ -193,7 +207,7 @@ Planned assertions (mechanical, not subjective):
 
 ## Person 2: indexing and retrieval
 
-Requires Python 3.10 or newer. Install dependencies with `uv sync --python 3.12`.
+Requires Python 3.11 or newer. Install dependencies with `uv sync --python 3.12`.
 
 Build the local TF-IDF index (no API access or credentials needed):
 
@@ -242,3 +256,60 @@ Use `--top-k 8` to change the result count or `--fixture fixtures/03_tight_band_
 to use another fixture. The CLI loads `.env` and prints recipe IDs, titles,
 retrieval scores, and vegetarian status. Explicit Pinecone mode reports cloud
 errors instead of silently switching backends.
+
+## Vision development
+
+The vision feature has three boundaries:
+
+1. `OpenAIVisionProvider` or `MockVisionProvider` returns `RawVisionResult`.
+2. `IngredientNormalizer` maps each raw label to the recipe-corpus vocabulary.
+3. `parse_pantry_image` returns `PantryParseResult` for human confirmation.
+
+Run the full pipeline without an API key:
+
+```bash
+python examples/run_vision_mock.py
+```
+
+Run one live request:
+
+```bash
+export OPENAI_API_KEY="your-key"
+# Optional override; the default is gpt-5.6-luna.
+export OPENAI_VISION_MODEL="gpt-5.6-luna"
+python examples/run_vision_live.py
+```
+
+Run the independent vision UI:
+
+```bash
+streamlit run vision_app.py
+```
+
+The UI ends by displaying and downloading `confirmed_pantry.json`, whose schema
+is `PantryState`. It never imports or runs retrieval, scoring, inventory, or the
+planning pipeline, so planning can be developed and integrated independently.
+
+You may pass a different image to the live script:
+
+```bash
+python examples/run_vision_live.py /path/to/pantry-photo.jpg
+```
+
+Common maintenance points:
+
+- Add recognized foods to `data/ingredient_catalog.json`.
+- Add semantic label mappings such as `capsicum -> bell_pepper` to
+  `data/ingredient_aliases.json`.
+- Add or change corpus ingredient IDs in `recipes.py`; the normalizer discovers
+  its authoritative vocabulary from that corpus automatically.
+- Tune `DEFAULT_LOW_CONFIDENCE` in `vision.py` to change which detections the UI
+  asks the user to review.
+- Keep recipe recommendation, scoring, and inventory depletion out of the
+  vision prompt; those remain deterministic downstream responsibilities.
+
+Recognition and recipe support are deliberately separate. For example,
+`dragon_fruit` is a recognized catalog item and `pitaya` is one of its aliases,
+but `recipe_supported` remains false until at least one recipe in `recipes.py`
+uses `dragon_fruit`. An entirely unknown label is preserved with
+`normalization_status="unmapped"` for correction in the confirmation UI.
