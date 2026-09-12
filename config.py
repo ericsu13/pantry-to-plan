@@ -86,7 +86,7 @@ class Settings:
             os.environ.get("AGENTIC_ENABLED", "false").lower() == "true"
         )
         self.advisor_model = os.environ.get("ADVISOR_MODEL", ADVISOR_MODEL)
-        self.advisor_temperature = float(os.environ.get("ADVISOR_TEMPERATURE", "0.0"))
+        self.advisor_temperature = float(os.environ.get("ADVISOR_TEMPERATURE", "0.7"))
         self.week_pool_top_k = int(os.environ.get("WEEK_POOL_TOP_K", WEEK_POOL_TOP_K))
         self.max_relaxation_rounds = int(
             os.environ.get("MAX_RELAXATION_ROUNDS", MAX_RELAXATION_ROUNDS)

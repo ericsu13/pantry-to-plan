@@ -317,10 +317,16 @@ def advisor_status() -> tuple[bool, str]:
 
 def build_advisor():
     """The live OpenAI-backed PlannerAdvisor. Only call when advisor_status()
-    reports available."""
+    reports available. Sampling temperature comes from settings (ADVISOR_TEMPERATURE)
+    so agentic re-runs on the same pantry vary instead of pinning one plan."""
     from advisor import OpenAIPlannerAdvisor
+    from config import load_settings
 
-    return OpenAIPlannerAdvisor()
+    settings = load_settings()
+    return OpenAIPlannerAdvisor(
+        model=settings.advisor_model,
+        temperature=settings.advisor_temperature,
+    )
 
 
 # ---------------------------------------------------------------- run planner
