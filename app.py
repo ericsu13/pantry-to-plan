@@ -9,6 +9,7 @@ Run it with:  .venv/bin/streamlit run app.py
 """
 
 import base64
+import html
 import time
 from pathlib import Path
 
@@ -27,7 +28,6 @@ EDITOR_COLUMNS = [
     "confidence",
     "source_text",
     "normalization_status",
-    "recipe_supported",
 ]
 
 # ------------------------------------------------------------------- brand
@@ -148,6 +148,14 @@ p { line-height: 1.62; }
   text-align: center; margin: 0.25rem 0 0.1rem;
 }
 .pp-upload-copy { color: var(--pp-muted); font-size: 0.82rem; text-align: center; margin-bottom: 0.8rem; }
+.pp-upload-preview {
+  display: block; margin: 0.6rem auto 0.2rem; width: 100%; max-width: 100%; max-height: 34rem;
+  height: auto; object-fit: contain; border-radius: 12px;
+  border: 1px solid var(--pp-border); box-shadow: 0 8px 18px rgba(61, 72, 63, 0.12);
+}
+.pp-upload-preview-caption {
+  color: var(--pp-muted); font-size: 0.75rem; text-align: center; margin: 0.15rem 0 0.5rem;
+}
 .pp-upload-pantry {
   display: block; width: min(100%, 15rem); height: auto; margin: 0.5rem auto;
   filter: drop-shadow(0 12px 16px rgba(61, 72, 63, 0.1));
@@ -207,6 +215,15 @@ hr { border-color: var(--pp-border) !important; }
 .stButton > button[kind="secondary"] { background: rgba(255,254,250,0.88); color: var(--pp-ink); }
 .stButton > button:disabled { transform: none; box-shadow: none; }
 [data-testid="stBaseButton-primary"] { background: var(--pp-green); }
+/* Tertiary buttons read as a plain text link (used for the demo-quantity helper),
+   matching the caption's size/weight rather than a prominent button. */
+.stButton > button[kind="tertiary"] {
+  min-height: 0; padding: 0.1rem 0; border: 0; background: none; box-shadow: none;
+  font-weight: 400; font-size: 0.875rem; color: var(--pp-muted); text-decoration: underline;
+}
+.stButton > button[kind="tertiary"]:hover {
+  transform: none; box-shadow: none; background: none; color: var(--pp-green-deep);
+}
 
 /* Inputs and controls. */
 [data-baseweb="select"] > div, [data-baseweb="input"] > div, .stNumberInput input {
@@ -272,6 +289,11 @@ hr { border-color: var(--pp-border) !important; }
   display: inline-block; font-size: 0.74rem; padding: 0.3rem 0.58rem; border-radius: 10px;
   margin: 0.17rem 0.3rem 0.17rem 0; background: var(--pp-cream-deep); color: #3c463f; border: 1px solid var(--pp-border);
 }
+.pp-steps {
+  margin: 0.1rem 0 0.1rem 1.05rem; padding: 0; color: #3c463f;
+  font-size: 0.78rem; line-height: 1.5;
+}
+.pp-steps li { margin: 0.1rem 0; }
 .pp-meal-facts {
   display: flex; flex-wrap: wrap; gap: 0.32rem 0.55rem; align-items: center;
   color: var(--pp-muted); font-size: 0.73rem; margin: 0.55rem 0 0.2rem;
@@ -451,7 +473,19 @@ def step_upload() -> None:
                 "Pantry photo", type=["png", "jpg", "jpeg"], label_visibility="collapsed"
             )
             if uploaded is not None:
-                st.image(uploaded, caption="Your pantry", use_container_width=True)
+                # Render a size-capped preview (max-height in CSS) rather than a
+                # container-width image, so a tall portrait photo doesn't push
+                # the rest of the page off-screen.
+                mime = uploaded.type or "image/png"
+                preview_uri = (
+                    f"data:{mime};base64,"
+                    + base64.b64encode(uploaded.getvalue()).decode("ascii")
+                )
+                st.markdown(
+                    f"<img class='pp-upload-preview' src='{preview_uri}' alt='Your pantry photo'>"
+                    "<div class='pp-upload-preview-caption'>Your pantry</div>",
+                    unsafe_allow_html=True,
+                )
 
             left, right = st.columns(2)
             with left:
@@ -536,11 +570,18 @@ def step_confirm() -> None:
         )
 
     pantry_summary = st.empty()
+    # The "double-check these" message depends on the live edited table, so it is
+    # filled after the editor renders; the placeholder keeps it above the Review
+    # notes and the table (the order the eye should read: what to fix, the
+    # detailed notes, then the table itself).
+    double_check = st.empty()
 
-    for warning in parse_result.warnings:
-        st.warning(warning)
+    # parse_result.warnings is just the issue codes (see vision.py); the Review
+    # notes expander below shows the same codes with their messages, so we render
+    # only that here instead of a redundant stack of bare-code banners. Collapsed
+    # by default so the table stays close to the top.
     if parse_result.issues:
-        with st.expander(f"Review notes ({len(parse_result.issues)})", expanded=True):
+        with st.expander(f"Review notes ({len(parse_result.issues)})", expanded=False):
             for issue in parse_result.issues:
                 st.warning(f"**{issue.code}** - {issue.message}")
 
@@ -610,15 +651,25 @@ def step_confirm() -> None:
                     "</span></div>",
                     unsafe_allow_html=True,
                 )
-    if flagged:
-        st.warning(f"Please double-check these before continuing: {', '.join(flagged)}")
-    else:
-        st.success("Everything looks clear. Tweak anything you like, then confirm.")
+    with double_check.container():
+        if flagged:
+            st.warning(f"Please double-check these before continuing: {', '.join(flagged)}")
+        else:
+            st.success("Everything looks clear. Tweak anything you like, then confirm.")
 
     st.caption(
         "Only checked rows are planned. Edit names and canonical IDs or remove "
         "rows; a canonical ID must use lowercase snake_case."
     )
+
+    if st.button(
+        "🎲 Fill demo quantities",
+        type="tertiary",
+        help="Fill any blank quantities with random amounts (50-500 g, in 50 g steps).",
+    ):
+        st.session_state.editor_rows = svc.fill_random_quantities(list(edited))
+        st.session_state.editor_version += 1
+        st.rerun()
 
     with st.expander("Add an ingredient manually"):
         manual_name = st.text_input("Ingredient name", key="manual_ingredient_name")
@@ -800,6 +851,9 @@ def _day_row(day_plan) -> None:
                 for ing in recipe.ingredients
             ]
             st.markdown(f"<div>{''.join(chips)}</div>", unsafe_allow_html=True)
+        with st.expander("Instructions"):
+            steps = "".join(f"<li>{html.escape(step)}</li>" for step in recipe.instructions)
+            st.markdown(f"<ol class='pp-steps'>{steps}</ol>", unsafe_allow_html=True)
 
 
 def _shopping_list(plan) -> None:

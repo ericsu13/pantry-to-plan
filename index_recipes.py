@@ -225,13 +225,17 @@ def index_recipes_to_pinecone() -> None:
             openai_client, recipe_text(recipe), embedding_model, embedding_dims
         )
 
-        # Prepare metadata
+        # Prepare metadata. Instructions ride along so the vector record stays
+        # consistent with the corpus; retrieval still resolves exact recipe
+        # facts (including steps) from recipes.py via repository.get_recipe(),
+        # and instructions are intentionally left out of the embedded text.
         metadata = {
             "recipe_id": recipe.recipe_id,
             "title": recipe.title,
             "cuisine_tags": recipe.cuisine_tags,
             "vegetarian": recipe.vegetarian,
             "calories_per_serving": recipe.calories_per_serving,
+            "instructions": recipe.instructions,
         }
 
         vectors_to_upsert.append((

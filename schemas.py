@@ -175,6 +175,9 @@ class Recipe(AppBaseModel):
     calories_per_serving: PositiveInt
     vegetarian: bool
     ingredients: list[RecipeIngredient] = Field(min_length=1)
+    # Ordered, concise cooking steps. Source of truth for the UI drilldown;
+    # not part of the retrieval/embedding text (title + ingredients + cuisine).
+    instructions: list[Annotated[str, Field(min_length=1)]] = Field(min_length=1)
     cook_time_min: PositiveInt | None = None
 
 
