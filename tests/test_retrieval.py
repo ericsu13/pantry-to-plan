@@ -10,7 +10,7 @@ import numpy as np
 import index_recipes as indexing
 from pipeline import generate_plan
 from recipes import RECIPES
-from retrieval import LocalRetriever, PineconeRetriever, create_retriever
+from retrieval import AutoRetriever, LocalRetriever, PineconeRetriever, create_retriever
 from schemas import PantryItem, PantryState, PlanningRequest
 
 
@@ -101,10 +101,64 @@ class RetrievalTests(unittest.TestCase):
 
     def test_initialization_failure_can_fall_back_offline(self):
         with patch.dict('os.environ', {'OPENAI_API_KEY': 'fake', 'PINECONE_API_KEY': 'fake',
-                                      'PINECONE_INDEX_NAME': 'fake', 'RETRIEVAL_BACKEND': 'pinecone'}), \
+                                      'PINECONE_INDEX_NAME': 'fake', 'RETRIEVAL_BACKEND': 'auto'}), \
              patch('retrieval.PineconeRetriever', side_effect=ConnectionError('offline')):
             retriever = create_retriever()
             self.assertTrue(retriever.search(self.pantry, self.request, 5))
+
+    def test_auto_success_does_not_build_local(self):
+        with patch.dict('os.environ', {'OPENAI_API_KEY': 'fake', 'PINECONE_API_KEY': 'fake',
+                                      'PINECONE_INDEX_NAME': 'fake'}, clear=True), \
+             patch('retrieval.PineconeRetriever') as cloud, \
+             patch('retrieval.LocalRetriever') as local:
+            expected = [Mock(recipe_id='example')]
+            cloud.return_value.search.return_value = expected
+            retriever = create_retriever()
+            self.assertIsInstance(retriever, AutoRetriever)
+            self.assertEqual(retriever.search(self.pantry, self.request), expected)
+            local.assert_not_called()
+            self.assertEqual(retriever.backend, 'pinecone')
+
+    def test_query_failure_switches_to_local_for_later_calls(self):
+        with patch.dict('os.environ', {'OPENAI_API_KEY': 'fake', 'PINECONE_API_KEY': 'fake',
+                                      'PINECONE_INDEX_NAME': 'fake'}, clear=True), \
+             patch('retrieval.PineconeRetriever') as cloud:
+            cloud.return_value.search.side_effect = TimeoutError('offline')
+            retriever = create_retriever()
+            first = retriever.search(self.pantry, self.request, 5)
+            self.assertTrue(first)
+            self.assertEqual(first, retriever.search(self.pantry, self.request, 5))
+            self.assertEqual(cloud.return_value.search.call_count, 1)
+            self.assertEqual(retriever.backend, 'local')
+            self.assertIsNotNone(retriever.fallback_reason)
+            self.assertTrue(all(next(r for r in RECIPES if r.recipe_id == c.recipe_id).vegetarian
+                                for c in first))
+
+    def test_auto_missing_credentials_uses_local(self):
+        with patch.dict('os.environ', {}, clear=True), \
+             patch('retrieval.PineconeRetriever') as cloud:
+            retriever = create_retriever()
+            self.assertTrue(retriever.search(self.pantry, self.request, 5))
+            cloud.assert_not_called()
+            self.assertEqual(retriever.backend, 'local')
+
+    def test_empty_results_and_unknown_ids_do_not_trigger_fallback(self):
+        with patch.dict('os.environ', {'OPENAI_API_KEY': 'fake', 'PINECONE_API_KEY': 'fake',
+                                      'PINECONE_INDEX_NAME': 'fake'}, clear=True), \
+             patch('retrieval.PineconeRetriever') as cloud, \
+             patch('retrieval.LocalRetriever') as local:
+            retriever = create_retriever()
+            cloud.return_value.search.return_value = []
+            self.assertEqual(retriever.search(self.pantry, self.request), [])
+            cloud.return_value.search.side_effect = ValueError('UNKNOWN_RECIPE_ID: bad')
+            with self.assertRaisesRegex(ValueError, 'UNKNOWN_RECIPE_ID'):
+                retriever.search(self.pantry, self.request)
+            local.assert_not_called()
+
+    def test_explicit_pinecone_reports_errors(self):
+        with patch('retrieval.PineconeRetriever', side_effect=ConnectionError('offline')):
+            with self.assertRaises(ConnectionError):
+                create_retriever('pinecone')
 
 
 if __name__ == '__main__':

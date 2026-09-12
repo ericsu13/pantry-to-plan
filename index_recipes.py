@@ -10,6 +10,7 @@ OpenAI + Pinecone for all production retrieval.
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -66,19 +67,12 @@ def validate_corpus() -> list[str]:
 
         # Check ingredients
         for ing in recipe.ingredients:
-            # Ingredient ID should be lowercase snake_case
-            if ing.ingredient_id != ing.ingredient_id.lower():
+            # Allow lowercase words separated by single underscores.
+            if not re.fullmatch(r"[a-z]+(?:_[a-z]+)*", ing.ingredient_id):
                 errors.append(
                     f"Recipe {recipe.recipe_id}: ingredient_id '{ing.ingredient_id}' "
-                    "should be lowercase"
+                    "should be lowercase snake_case"
                 )
-            if not ing.ingredient_id or "_" not in ing.ingredient_id and len(ing.ingredient_id) > 1:
-                # Allow single-word ingredients (e.g., "egg") or snake_case
-                if " " in ing.ingredient_id or any(c.isupper() for c in ing.ingredient_id):
-                    errors.append(
-                        f"Recipe {recipe.recipe_id}: ingredient_id '{ing.ingredient_id}' "
-                        "should be lowercase snake_case"
-                    )
             if ing.quantity_g <= 0:
                 errors.append(
                     f"Recipe {recipe.recipe_id}: ingredient '{ing.ingredient_id}' "

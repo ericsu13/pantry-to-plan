@@ -285,52 +285,63 @@ class LocalRetriever:
         return " ".join(parts)
 
 
-def create_retriever() -> Retriever:
-    """Factory to create a retriever instance.
+class AutoRetriever:
+    """Try cloud retrieval; after a provider failure, stay local for this instance."""
 
-    Tries to create a PineconeRetriever if API keys are available.
-    Falls back to LocalRetriever (TF-IDF) if Pinecone keys are missing.
+    def __init__(self):
+        self.backend = "pinecone"
+        self.fallback_reason = None
+        self._retriever = None
 
-    Environment variables:
-        OPENAI_API_KEY: Required for Pinecone mode
-        PINECONE_API_KEY: Required for Pinecone mode
-        PINECONE_INDEX_NAME: Required for Pinecone mode
-        OPENAI_EMBEDDING_DIMENSIONS: Default 512; must match the indexed recipe vectors
-        RETRIEVAL_BACKEND: Optional; "pinecone" or "local" to force choice
+    def _use_local(self, reason: str) -> None:
+        self.fallback_reason = reason
+        print(f"{reason}; falling back to LocalRetriever (TF-IDF)", flush=True)
+        self._retriever = LocalRetriever()
+        self.backend = "local"
 
-    Pinecone Index Setup:
-        Create index in https://console.pinecone.io/ with:
-        - Dimension: 512 (to match OPENAI_EMBEDDING_DIMENSIONS)
-        - Metric: cosine
-        - Namespace: "recipes" (or set PINECONE_NAMESPACE env var)
+    def search(self, pantry: PantryState, request: PlanningRequest,
+               top_k: int = 8) -> list[RecipeCandidate]:
+        if top_k <= 0:
+            raise ValueError("top_k must be positive")
+        if self.backend == "local":
+            return self._retriever.search(pantry, request, top_k)
 
-    Returns:
-        A Retriever instance (either Pinecone or local).
+        required = ("OPENAI_API_KEY", "PINECONE_API_KEY", "PINECONE_INDEX_NAME")
+        missing = [name for name in required if not os.environ.get(name)]
+        if missing:
+            self._use_local("Missing cloud settings: " + ", ".join(missing))
+        else:
+            from openai import APIError
+            from pinecone.errors.exceptions import PineconeError
+
+            try:
+                if self._retriever is None:
+                    self._retriever = PineconeRetriever()
+                # Empty results are valid. Unknown IDs and validation errors
+                # propagate instead of being hidden by fallback.
+                return self._retriever.search(pantry, request, top_k)
+            except (APIError, PineconeError, ConnectionError, TimeoutError) as exc:
+                self._use_local(f"Cloud retrieval failed ({type(exc).__name__})")
+        return self._retriever.search(pantry, request, top_k)
+
+
+def create_retriever(backend: Optional[str] = None) -> Retriever:
+    """Choose auto (default), strict Pinecone, or local retrieval.
+
+    RETRIEVAL_BACKEND overrides the default when no argument is supplied.
+    Auto handles missing credentials and provider errors during initialization
+    or search. Explicit pinecone mode reports failures without switching.
     """
-    backend = os.environ.get("RETRIEVAL_BACKEND", "pinecone").lower()
-
-    # Force local if explicitly requested
+    backend = (backend or os.environ.get("RETRIEVAL_BACKEND", "auto")).lower()
+    if backend == "auto":
+        return AutoRetriever()
     if backend == "local":
         print("Using LocalRetriever (TF-IDF)")
         return LocalRetriever()
-
-    # Try Pinecone
-    if all([
-        os.environ.get("OPENAI_API_KEY"),
-        os.environ.get("PINECONE_API_KEY"),
-        os.environ.get("PINECONE_INDEX_NAME"),
-    ]):
-        try:
-            print("Using PineconeRetriever (OpenAI embeddings + Pinecone)")
-            return PineconeRetriever()
-        except Exception as e:
-            print(f"Failed to initialize Pinecone: {e}")
-            print("Falling back to LocalRetriever (TF-IDF)")
-            return LocalRetriever()
-
-    # Fall back to local if Pinecone keys missing
-    print("Pinecone keys not found; using LocalRetriever (TF-IDF)")
-    return LocalRetriever()
+    if backend == "pinecone":
+        print("Using PineconeRetriever (OpenAI embeddings + Pinecone)")
+        return PineconeRetriever()
+    raise ValueError(f"Unknown retrieval backend: {backend}")
 
 
 # Backward compatibility
@@ -348,7 +359,11 @@ if __name__ == "__main__":
     from schemas import PantryItem
 
     parser = argparse.ArgumentParser(description="Search recipes using a pantry fixture")
-    parser.add_argument("--backend", choices=("local", "pinecone"), default="local")
+    # Backend priority: --backend > RETRIEVAL_BACKEND from the environment/.env > auto.
+    # Auto tries Pinecone first and falls back to TF-IDF on missing credentials
+    # or cloud errors. Explicit pinecone mode has no fallback; local uses TF-IDF.
+    parser.add_argument("--backend", choices=("auto", "local", "pinecone"),
+                        help="Default: RETRIEVAL_BACKEND or auto (Pinecone with local fallback)")
     parser.add_argument("--fixture", type=Path, default=Path(__file__).resolve().parent /
                         "fixtures/01_well_stocked_veg_italian.json")
     parser.add_argument("--top-k", type=int, default=5)
@@ -363,10 +378,12 @@ if __name__ == "__main__":
         ) for name, quantity in pantry_data["items"].items()]
     pantry = PantryState.model_validate(pantry_data)
     request = PlanningRequest.model_validate(fixture["request"])
-    # Explicit backend selection: a cloud failure should be visible in this demo.
-    retriever = LocalRetriever() if args.backend == "local" else PineconeRetriever()
-    print(f"Backend: {args.backend}; fixture: {args.fixture.name}", flush=True)
-    for candidate in retriever.search(pantry, request, args.top_k):
+    retriever = create_retriever(args.backend)
+    candidates = retriever.search(pantry, request, args.top_k)
+    actual_backend = (retriever.backend if isinstance(retriever, AutoRetriever)
+                      else "local" if isinstance(retriever, LocalRetriever) else "pinecone")
+    print(f"Backend: {actual_backend}; fixture: {args.fixture.name}", flush=True)
+    for candidate in candidates:
         recipe = get_recipe(candidate.recipe_id)
         print(f"{candidate.retrieval_score:.4f}  {recipe.recipe_id}: {recipe.title} "
               f"(vegetarian={recipe.vegetarian})")

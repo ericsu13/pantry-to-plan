@@ -214,9 +214,10 @@ The cloud setup command loads `.env` and requires `OPENAI_API_KEY`,
 Repeated setup reuses those vectors and upserts current recipe metadata.
 
 Set `RETRIEVAL_BACKEND=local` to force offline retrieval. Local retrieval never
-calls cloud indexing, even with credentials configured. The factory also falls
-back locally when cloud initialization fails; query-time failures are still
-reported to the caller. Both backends use
+calls cloud indexing, even with credentials configured. The factory defaults to `auto`: it tries Pinecone and falls back locally
+on missing credentials or cloud initialization/search errors. It reports the
+fallback and stays local for the lifetime of that retriever. Empty results and
+unknown recipe IDs do not trigger fallback. Both backends use
 `search(pantry, request, top_k)` and exclude non-vegetarian recipes when required.
 Pinecone queries apply the vegetarian metadata filter and reject unknown IDs.
 Cuisine mismatches remain candidates for the planner's explicit fallback.
@@ -227,9 +228,12 @@ Run the planner and retrieval tests without live API calls:
 uv run python -m unittest discover -s tests
 ```
 
-Run retrieval directly with the included vegetarian Italian pantry fixture:
+Run retrieval directly with the included vegetarian Italian pantry fixture.
+Omitting `--backend` uses `RETRIEVAL_BACKEND` when set, otherwise `auto`:
 
 ```bash
+uv run python retrieval.py
+uv run python retrieval.py --backend auto
 uv run python retrieval.py --backend local
 uv run python retrieval.py --backend pinecone
 ```
