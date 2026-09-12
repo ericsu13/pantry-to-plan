@@ -43,7 +43,7 @@ ALL_CUISINES = ["italian", "american", "chinese", "indian"]
 WEEK_OBJECTIVES = ["minimize_shopping_list", "smart_depletion", "variety"]
 WEEK_POOL_TOP_K = 24         # candidate pool the week planner reasons over
 MAX_RELAXATION_ROUNDS = 4    # per-day cap on relax-and-repair rounds (bounds termination)
-ADVISOR_MODEL = "gpt-4o"     # OpenAI model for the live LangChain advisor (env-overridable)
+ADVISOR_MODEL = "gpt-4o"     # OpenAI model for the live advisor (env-overridable)
 
 # Selection temperature for the per-day pick. The planner samples among the
 # eligible, in-cuisine, unused candidates with probability proportional to
@@ -69,7 +69,9 @@ class Settings:
     (plain os.environ) for a clean fresh-checkout run."""
 
     def __init__(self):
-        self.retriever_backend = os.environ.get("RETRIEVER_BACKEND", "local")
+        # Matches retrieval.create_retriever(): auto (Pinecone w/ local fallback),
+        # local, or pinecone. Spelling aligns with the factory's env var.
+        self.retriever_backend = os.environ.get("RETRIEVAL_BACKEND", "auto")
         self.top_k = int(os.environ.get("TOP_K", DEFAULT_TOP_K))
         self.use_llm_explanations = (
             os.environ.get("USE_LLM_EXPLANATIONS", "false").lower() == "true"

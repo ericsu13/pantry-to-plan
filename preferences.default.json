@@ -2,6 +2,6 @@
   "cuisines": ["italian"],
   "dinner_calorie_target": 600,
   "days": 3,
-  "vegetarian_required": true,
+  "vegetarian_required": false,
   "goal": "general"
 }

@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import re
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -116,11 +117,71 @@ def cached_cloud_embedding(client, text: str, model: str, dimensions: int) -> li
     return vector
 
 
+def _index_dimension(pc, name: str) -> Optional[int]:
+    """Best-effort read of an existing index's vector dimension.
+
+    Returns None when the dimension can't be determined. Reads the top-level
+    dimension first, then falls back to index stats (which also reports the
+    server-side width of an integrated/semantic index).
+    """
+    try:
+        dim = getattr(pc.describe_index(name), "dimension", None)
+        if dim:
+            return int(dim)
+    except Exception:
+        pass
+    try:
+        dim = pc.Index(name).describe_index_stats().get("dimension")
+        return int(dim) if dim else None
+    except Exception:
+        return None
+
+
+def ensure_pinecone_index(pc, name: str, dimensions: int) -> None:
+    """Make sure a dense Pinecone index `name` exists at `dimensions`.
+
+    - Missing: create a dense, cosine, serverless index at `dimensions`
+      (cloud/region overridable via PINECONE_CLOUD / PINECONE_REGION).
+    - Exists at the right dimension: reuse it as-is.
+    - Exists at a different dimension (e.g. a stale index or a 1024-dim
+      integrated-embedding index): raise with a clear message so the user
+      decides, rather than silently proceeding or destroying data.
+    """
+    from pinecone import ServerlessSpec
+
+    if name not in {i["name"] for i in pc.list_indexes()}:
+        cloud = os.environ.get("PINECONE_CLOUD", "aws")
+        region = os.environ.get("PINECONE_REGION", "us-east-1")
+        print(f"Creating Pinecone index '{name}' (dim={dimensions}, cosine, {cloud}/{region})...")
+        pc.create_index(
+            name=name,
+            dimension=dimensions,
+            metric="cosine",
+            spec=ServerlessSpec(cloud=cloud, region=region),
+        )
+        while not pc.describe_index(name).status["ready"]:
+            time.sleep(2)
+        return
+
+    current = _index_dimension(pc, name)
+    if current is not None and current != dimensions:
+        raise ValueError(
+            f"Pinecone index '{name}' already exists with dimension {current}, but the "
+            f"embedding config expects {dimensions}. This usually means the index was "
+            f"created for a different embedding model (for example a 1024-dim integrated "
+            f"index). Delete and recreate it at {dimensions} dims, or set "
+            f"OPENAI_EMBEDDING_DIMENSIONS to match the index, then re-run."
+        )
+    print(f"Reusing existing Pinecone index '{name}' (dim={current}).")
+
+
 def index_recipes_to_pinecone() -> None:
     """Upload all recipes to Pinecone with OpenAI embeddings.
 
     Uses OpenAI's text-embedding-3-small (512 dims) to embed recipes.
-    Reuses cached embeddings and replaces records with the same IDs on re-runs.
+    Ensures the target index exists at the expected dimension first (creating
+    it when missing, flagging a dimension mismatch), then reuses cached
+    embeddings and replaces records with the same IDs on re-runs.
 
     Requires:
         OPENAI_API_KEY
@@ -149,7 +210,9 @@ def index_recipes_to_pinecone() -> None:
     embedding_dims = int(os.environ.get("OPENAI_EMBEDDING_DIMENSIONS", "512"))
 
     pc = Pinecone(api_key=os.environ["PINECONE_API_KEY"])
-    index = pc.Index(os.environ["PINECONE_INDEX_NAME"])
+    index_name = os.environ["PINECONE_INDEX_NAME"]
+    ensure_pinecone_index(pc, index_name, embedding_dims)
+    index = pc.Index(index_name)
     namespace = os.environ.get("PINECONE_NAMESPACE", "recipes")
 
     print(f"Indexing {len(RECIPES)} recipes to Pinecone...")

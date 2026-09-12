@@ -30,6 +30,42 @@ pantry photo  ->  preferences + vegetarian gate  ->  meal plan  ->  shopping lis
    is enabled, and prefers ingredients already on hand.
 4. See a shopping list of what is missing across the plan.
 
+## Running the UI
+
+```
+.venv/bin/pip install -r requirements.txt
+.venv/bin/streamlit run app.py
+```
+
+The UI ([app.py](app.py)) is a thin Streamlit wizard: upload a pantry photo (or
+click "Use the demo pantry"), confirm and adjust the parsed items, set
+preferences, then get a day-by-day plan and shopping list. All non-widget logic
+lives in [app_services.py](app_services.py); Streamlit only holds UI state and
+confirmed typed objects. Preferences load from `preferences.default.json` and
+persist to `preferences.json` (gitignored) when changed.
+
+The confirm step is a human-in-the-loop review table (shared with the standalone
+[vision_app.py](vision_app.py)): each detected item has an **Include** toggle
+(checked by default, only checked rows are planned), editable name / canonical ID
+/ quantity, and read-only signals from the vision + normalization pass:
+**Confidence** as a bar, the **Detected label**, the **Mapping** status (exact /
+alias / unmapped), and whether the ingredient is **Used by recipes**. A
+"double-check these" banner recomputes live from the table (low confidence or
+missing quantity), and an "Add an ingredient manually" control normalizes typed
+names into the corpus vocabulary. Vegetarian is off by default; enable it in the
+Preferences step to apply the hard gate.
+
+Retrieval is live: [app_services.py](app_services.py) `get_retriever()` calls
+`retrieval.create_retriever()`, which defaults to `auto` (query Pinecone when
+`OPENAI_API_KEY` / `PINECONE_API_KEY` / `PINECONE_INDEX_NAME` are set and the
+index is built, otherwise TF-IDF local). Set `RETRIEVAL_BACKEND=local` to force
+the offline path. The photo step is wired to [vision.py](vision.py): with
+`OPENAI_API_KEY` set it runs the live vision parse, and without a key (or if
+vision.py is absent) it falls back to the bundled demo pantry so the wizard stays
+runnable end to end. The opt-in "smart planning" toggle uses the
+`OpenAIPlannerAdvisor` when `OPENAI_API_KEY` is set and degrades to the
+deterministic planner otherwise.
+
 ## Architecture
 
 ![Technical solution architecture: OpenAI vision and embeddings, Pinecone retrieval, Python scoring in a per-day loop, and a thin persistence interface, producing day plans, a shopping list, and constraint flags](docs/pantry-to-plan-architecture.png)
@@ -113,6 +149,33 @@ same plan. The eval and invariant tests use `temperature=0`; a dedicated test
 class exercises the sampled path across many seeds and confirms no hard
 constraint is ever violated.
 
+## Agentic planning (opt-in)
+
+Two optional strategies let a model shape the plan without ever touching the
+arithmetic. They activate only when a `PlannerAdvisor` is injected into
+`generate_plan(..., advisor=...)`; with no advisor the default greedy loop above
+runs unchanged. The governing rule is **agent proposes, deterministic core
+disposes**: the advisor only decides *what to try*, while scoring, eligibility,
+the vegetarian gate, depletion, and shopping-list reconciliation stay in
+deterministic Python.
+
+- **Whole-week planning**: the advisor proposes an ordered week from the scored
+  candidate pool, optimizing cross-day goals (minimize the shopping list, deplete
+  the pantry smartly, keep variety). The core then validates every proposed
+  recipe (unknown id, repeat, or vegetarian violation is dropped) and
+  materializes it, so no proposal can break an invariant.
+- **Relax-and-repair**: when a day cannot be filled, the advisor picks one
+  relaxation from a fixed menu (`ALLOW_REPEAT`, `CROSS_CUISINE`, `GIVE_UP`) and
+  the core applies it deterministically. Crossing cuisines is a flagged last
+  resort. The loop is bounded by `config.MAX_RELAXATION_ROUNDS`, and the
+  vegetarian gate is never on the menu, so it is never relaxed.
+
+The real advisor ([advisor.py](advisor.py) `OpenAIPlannerAdvisor`) calls
+OpenAI with structured output; tests and evals inject `FakePlannerAdvisor`, a
+deterministic double, so the agentic path is reproducible with no API key. Every
+agent decision is surfaced through `PlanResult.trace`, `PlanResult.warnings`, and
+`DayPlan.flags`.
+
 ## Data model
 
 See [schemas.py](schemas.py) (strict Pydantic models shared across modules):
@@ -146,16 +209,19 @@ corpus/retrieval, P3 planner/inventory, P4 UI/evals).
 | [generate_fixtures.py](generate_fixtures.py) | Builds eval fixtures from the corpus | P4 | done |
 | [fixtures/](fixtures/) | 23 eval scenarios (see [fixtures/README.md](fixtures/README.md)) | P1/P4 | done |
 | [constraints.py](constraints.py) | Hard eligibility (vegetarian gate) | P3 | done |
-| [scoring.py](scoring.py) | Score components + stable tie-break | P3 | done |
+| [scoring.py](scoring.py) | Score components + stable tie-break + softmax select | P3 | done |
 | [inventory.py](inventory.py) | Pantry depletion + shopping-list reconciliation | P3 | done |
-| [pipeline.py](pipeline.py) | Fixed N-day loop + aggregation | P3 | done |
-| [tests/](tests/) | Planner invariant, scenario, and schema-validation tests | P3/P1 | done |
+| [pipeline.py](pipeline.py) | N-day loop (greedy default + agentic strategies) + aggregation | P3 | done |
+| [advisor.py](advisor.py) | Injected LLM decider for agentic planning (+ fake) | P3 | done |
+| [tests/](tests/) | Planner, retrieval, scenario, and schema-validation tests | P1/P2/P3 | done |
 | [vision.py](vision.py) | Validated image -> raw detection -> `PantryParseResult` | P1 | done |
 | [normalization.py](normalization.py) | Raw labels -> corpus-backed ingredient IDs | P1 | done |
 | [vision_app.py](vision_app.py) | Independent upload, review, confirmation UI | P1 | done |
-| `retrieval.py` | Retriever protocol + local/Pinecone adapters | P2 | todo |
+| [retrieval.py](retrieval.py) | Retriever protocol + local/Pinecone adapters | P2 | done |
+| [index_recipes.py](index_recipes.py) | Build/cache embeddings, ensure index (create/guard dims), upsert to Pinecone | P2 | done |
+| [app.py](app.py) | Streamlit wizard UI | P4 | done |
+| [app_services.py](app_services.py) | UI-supporting logic (prefs, pantry, retrieval, run) | P4 | done |
 | `explanations.py` | Evidence -> grounded reason text | P4 | todo |
-| `app.py` | Streamlit UI | P4 | todo |
 | `evals/run_eval.py` | Fixture suite -> `EvaluationSummary` | P4 | todo |
 
 The PRD calls for `recipes.json`; this repo uses [recipes.py](recipes.py)
@@ -215,12 +281,22 @@ Build the local TF-IDF index (no API access or credentials needed):
 uv run python index_recipes.py --backend local
 ```
 
-Build the Pinecone index explicitly after creating an index whose dimension
-matches `OPENAI_EMBEDDING_DIMENSIONS` (default 512):
+Build the Pinecone index:
 
 ```bash
 uv run python index_recipes.py --backend pinecone
 ```
+
+This embeds each recipe with OpenAI `text-embedding-3-small` (client-side) and
+upserts dense vectors, so the index must be a plain dense index whose dimension
+matches `OPENAI_EMBEDDING_DIMENSIONS` (default 512), not a Pinecone
+integrated/semantic index. The build now manages that for you: it creates the
+index if missing (dense, cosine, serverless; `PINECONE_CLOUD` / `PINECONE_REGION`
+override the default `aws` / `us-east-1`), reuses it when it already exists at the
+right dimension, and stops with a clear error if it exists at a different
+dimension (for example a stale 1024-dim integrated index) rather than silently
+producing an unqueryable index. To fix a flagged mismatch, delete and recreate
+the index at the expected dimension, or set `OPENAI_EMBEDDING_DIMENSIONS` to match.
 
 The cloud setup command loads `.env` and requires `OPENAI_API_KEY`,
 `PINECONE_API_KEY`, and `PINECONE_INDEX_NAME`. Recipe embeddings are cached under

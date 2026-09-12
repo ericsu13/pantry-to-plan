@@ -5,10 +5,10 @@ stays a thin view layer: preference persistence, pantry sourcing, request
 building, retrieval, running the planner, and copy helpers. No Streamlit import
 in this module, and every function returns plain data or a typed schema object.
 
-Two upstream modules are not built yet: vision.py (P1 image reader) and
-retrieval.py (P2 retriever). This module calls them when present and falls back
-to a runnable local path otherwise, so the UI works end to end today and
-auto-upgrades when those land.
+The upstream modules vision.py (P1 image reader) and retrieval.py (P2 retriever)
+are wired in. This module calls them when present and falls back to a runnable
+local path otherwise (no API key, or a checkout missing those modules), so the UI
+works end to end in every environment.
 """
 
 import json
@@ -20,13 +20,16 @@ from inventory import build_shopping_list  # noqa: F401  (re-exported for caller
 from pipeline import generate_plan
 from repository import load_recipes
 from schemas import (
+    NormalizationStatus,
     PantryItem,
+    PantryItemCandidate,
     PantryParseResult,
     PantryState,
     PlanningRequest,
     PlanResult,
     RecipeCandidate,
 )
+from vision_ui_helpers import candidates_to_editor_rows, editor_rows_to_pantry
 
 ROOT = Path(__file__).resolve().parent
 FIXTURES_DIR = ROOT / "fixtures"
@@ -77,12 +80,26 @@ GOALS = list(GOAL_CALORIE_TOLERANCE)
 # review on the confirm step. The clean demo pantry trips none of these.
 LOW_CONFIDENCE_THRESHOLD = 0.6
 
+
+# Re-exported so app.py can catch a hard vision failure via svc.VisionError
+# without importing vision.py itself. A stand-in keeps the import working on a
+# checkout where vision.py is absent.
+try:
+    from vision import VisionPipelineError as VisionError  # type: ignore
+except ImportError:  # pragma: no cover - vision.py is present in this repo
+    class VisionError(RuntimeError):
+        """Fallback when vision.py is unavailable; carries an optional AppIssue."""
+
+        def __init__(self, issue=None):
+            super().__init__(getattr(issue, "message", "Vision parsing failed."))
+            self.issue = issue
+
 # Safety net only; the real defaults live in preferences.default.json.
 _FALLBACK_PREFS = {
     "cuisines": ["italian"],
     "dinner_calorie_target": 600,
     "days": 3,
-    "vegetarian_required": True,
+    "vegetarian_required": False,
     "goal": "general",
 }
 
@@ -105,14 +122,27 @@ def save_preferences(prefs: dict) -> None:
 
 
 # ------------------------------------------------------------ pantry sourcing
-def _items_from_fixture(path: Path) -> list[PantryItem]:
+def _candidates_from_fixture(path: Path) -> list[PantryItemCandidate]:
+    """Load a pantry fixture as machine-proposed candidates for the confirm step.
+
+    The fixture keys are already canonical corpus ingredient IDs, so each maps
+    exactly and is recipe-supported when it appears in the corpus. Confidence is
+    a full 1.0 (a curated fixture, not a noisy vision read), and the detected
+    label is the human-readable form of the id.
+    """
+    from normalization import corpus_ingredient_ids
+
+    supported = corpus_ingredient_ids()
     data = json.loads(path.read_text())
     return [
-        PantryItem(
+        PantryItemCandidate(
             ingredient_id=ing_id,
             display_name=ing_id.replace("_", " ").title(),
             quantity_g=float(grams),
             confidence=1.0,
+            source_text=ing_id.replace("_", " "),
+            normalization_status=NormalizationStatus.EXACT,
+            recipe_supported=ing_id in supported,
         )
         for ing_id, grams in data["pantry"]["items"].items()
     ]
@@ -121,60 +151,89 @@ def _items_from_fixture(path: Path) -> list[PantryItem]:
 def load_demo_parse_result() -> PantryParseResult:
     """The bundled well-stocked vegetarian Italian pantry, as if freshly parsed.
 
-    Used both when the user skips the photo and (per the locked UI decision) as
-    the parse result for an uploaded photo until vision.py exists.
+    Used both when the user skips the photo and as the fallback parse result for
+    an uploaded photo when no OPENAI_API_KEY is set.
     """
-    return PantryParseResult(items=_items_from_fixture(DEMO_FIXTURE), warnings=[])
+    return PantryParseResult(
+        items=_candidates_from_fixture(DEMO_FIXTURE),
+        warnings=[],
+        provider="demo",
+    )
 
 
 def parse_pantry_image(file_bytes: bytes) -> PantryParseResult:
     """Read a pantry photo into a PantryParseResult.
 
-    Calls P1's vision.py when it lands; until then falls back to the demo pantry
-    so the wizard is runnable end to end. A real vision error is not swallowed.
+    Uses P1's vision.py with the live OpenAI provider when OPENAI_API_KEY is set.
+    Without a key (or if vision.py is unavailable) it falls back to the bundled
+    demo pantry so the wizard stays runnable end to end. A hard vision failure
+    (VisionPipelineError) is not swallowed, so the UI can surface the issue.
     """
     try:
-        from vision import parse_pantry_photo  # type: ignore
+        from vision import OpenAIVisionProvider
+        from vision import parse_pantry_image as run_vision
     except ImportError:
         return load_demo_parse_result()
-    return parse_pantry_photo(file_bytes)
+    if not os.environ.get("OPENAI_API_KEY"):
+        return load_demo_parse_result()
+    return run_vision(
+        file_bytes,
+        OpenAIVisionProvider(),
+        low_confidence_threshold=LOW_CONFIDENCE_THRESHOLD,
+    )
 
 
-def flagged_items(parse_result: PantryParseResult) -> list[PantryItem]:
-    """Items worth a second look before confirming: low confidence or no
-    quantity. Empty for the clean demo pantry."""
-    return [
-        it
-        for it in parse_result.items
-        if (it.confidence is not None and it.confidence < LOW_CONFIDENCE_THRESHOLD)
-        or it.quantity_g is None
-    ]
-
-
-def build_pantry_state(rows: list[dict]) -> PantryState:
-    """Turn edited confirm-step rows back into the typed pantry the planner uses.
-
-    Blank ids are dropped; a blank quantity becomes None (unknown amount);
-    confidence defaults to 1.0 for user-entered rows.
-    """
-    items: list[PantryItem] = []
+def flagged_rows(rows: list[dict]) -> list[str]:
+    """Display names of included table rows worth a second look: low confidence
+    or no quantity. Recomputed from the live table so fixing or unchecking a
+    row clears its flag. Empty for the clean demo pantry."""
+    flagged: list[str] = []
     for row in rows:
-        ing_id = str(row.get("ingredient_id") or "").strip()
-        if not ing_id:
+        if not bool(row.get("include", True)):
             continue
-        qty = row.get("quantity_g")
-        quantity_g = float(qty) if qty not in (None, "") else None
-        display = str(row.get("display_name") or "").strip() or ing_id.replace("_", " ").title()
         conf = row.get("confidence")
-        items.append(
-            PantryItem(
-                ingredient_id=ing_id,
-                display_name=display,
-                quantity_g=quantity_g,
-                confidence=float(conf) if conf not in (None, "") else 1.0,
-            )
-        )
-    return PantryState(items=items)
+        low_confidence = conf not in (None, "") and float(conf) < LOW_CONFIDENCE_THRESHOLD
+        missing_quantity = row.get("quantity_g") in (None, "")
+        if low_confidence or missing_quantity:
+            name = str(row.get("display_name") or row.get("ingredient_id") or "").strip()
+            if name:
+                flagged.append(name)
+    return flagged
+
+
+def rows_from_parse_result(parse_result: PantryParseResult) -> list[dict]:
+    """One editable table row per proposed item for the confirm step. Each row
+    carries the Include toggle (checked), the editable name/id/quantity, and the
+    read-only confidence, detected label, mapping, and recipe-support fields."""
+    return candidates_to_editor_rows(parse_result.items)
+
+
+def manual_ingredient_row(name: str) -> dict:
+    """A single confirm-step row for a user-typed ingredient, normalized to the
+    corpus vocabulary so its mapping and recipe-support columns are accurate."""
+    from normalization import IngredientNormalizer
+
+    normalized = IngredientNormalizer().normalize(name)
+    candidate = PantryItemCandidate(
+        ingredient_id=normalized.ingredient_id,
+        display_name=normalized.display_name,
+        quantity_g=None,
+        confidence=1.0,
+        source_text="user_added",
+        normalization_status=normalized.status,
+        recipe_supported=normalized.recipe_supported,
+    )
+    return candidates_to_editor_rows([candidate])[0]
+
+
+def pantry_from_rows(rows: list[dict]) -> PantryState:
+    """Turn edited confirm-step rows into the typed pantry the planner uses.
+
+    Only rows with Include checked are kept; duplicate canonical IDs are merged
+    (quantities summed, unknown if any is unknown) and malformed IDs are rejected
+    by the schema. Delegates to the shared, unit-tested vision_ui_helpers logic.
+    """
+    return editor_rows_to_pantry(rows)
 
 
 # ------------------------------------------------------------------- request
@@ -212,12 +271,15 @@ class _CorpusRetriever:
 
 
 def get_retriever():
-    """P2's real retriever when available, else the local corpus stand-in."""
+    """Real retriever (auto: Pinecone with local fallback) when available, else
+    the local corpus stand-in. The factory reads RETRIEVAL_BACKEND (auto by
+    default), so the app queries Pinecone when creds are present and degrades to
+    TF-IDF local otherwise."""
     try:
-        from retrieval import LocalRetriever  # type: ignore
+        from retrieval import create_retriever  # type: ignore
     except ImportError:
         return _CorpusRetriever()
-    return LocalRetriever()
+    return create_retriever()
 
 
 # ------------------------------------------------------------------- advisor
@@ -226,19 +288,15 @@ def advisor_status() -> tuple[bool, str]:
     reason is a short note to show when it is disabled."""
     if not os.environ.get("OPENAI_API_KEY"):
         return False, "Set OPENAI_API_KEY to enable smart planning."
-    try:
-        import langchain_openai  # noqa: F401
-    except ImportError:
-        return False, "Install langchain-openai to enable smart planning."
     return True, ""
 
 
 def build_advisor():
-    """The live LangChain-backed PlannerAdvisor. Only call when advisor_status()
+    """The live OpenAI-backed PlannerAdvisor. Only call when advisor_status()
     reports available."""
-    from advisor import LangChainPlannerAdvisor
+    from advisor import OpenAIPlannerAdvisor
 
-    return LangChainPlannerAdvisor()
+    return OpenAIPlannerAdvisor()
 
 
 # ---------------------------------------------------------------- run planner

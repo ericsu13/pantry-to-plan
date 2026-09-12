@@ -11,8 +11,22 @@ Run it with:  .venv/bin/streamlit run app.py
 import time
 
 import streamlit as st
+from pydantic import ValidationError
 
 import app_services as svc
+
+# Confirm-step table columns, in display order. Mirrors the standalone vision UI
+# so the wizard's human-in-the-loop review shows the same rich signals.
+EDITOR_COLUMNS = [
+    "include",
+    "display_name",
+    "ingredient_id",
+    "quantity_g",
+    "confidence",
+    "source_text",
+    "normalization_status",
+    "recipe_supported",
+]
 
 # ------------------------------------------------------------------- brand
 PALETTE = {
@@ -86,6 +100,8 @@ def _init_state() -> None:
     defaults = {
         "step": 1,
         "parse_result": None,   # PantryParseResult
+        "editor_rows": None,    # confirm-step table rows (list[dict])
+        "editor_version": 0,    # bumped to re-seed the editor after a manual add
         "pantry": None,         # confirmed PantryState
         "prefs": None,          # preferences dict
         "use_advisor": False,   # UI toggle
@@ -103,10 +119,20 @@ def go_to(step: int) -> None:
 
 
 def reset_all() -> None:
-    for key in ("parse_result", "pantry", "plan", "source"):
+    for key in ("parse_result", "editor_rows", "pantry", "plan", "source"):
         st.session_state[key] = None
     st.session_state.day_index = 0
+    st.session_state.editor_version += 1
     go_to(1)
+
+
+def _seed_parse_result(result, source: str) -> None:
+    """Store a fresh parse and (re)seed the confirm-step editor rows from it."""
+    st.session_state.parse_result = result
+    st.session_state.editor_rows = svc.rows_from_parse_result(result)
+    st.session_state.editor_version += 1
+    st.session_state.source = source
+    go_to(2)
 
 
 # ---------------------------------------------------------------- chrome
@@ -170,69 +196,131 @@ def step_upload() -> None:
         demo = st.button("Use the demo pantry", use_container_width=True)
 
     if read and uploaded is not None:
-        st.session_state.parse_result = svc.parse_pantry_image(uploaded.getvalue())
-        st.session_state.source = "photo"
-        go_to(2)
+        try:
+            with st.spinner("Reading your pantry photo: scanning the shelves and naming ingredients..."):
+                result = svc.parse_pantry_image(uploaded.getvalue())
+        except svc.VisionError as exc:
+            issue = getattr(exc, "issue", None)
+            st.error(getattr(issue, "message", str(exc)))
+            hint = getattr(issue, "suggested_action", None)
+            if hint:
+                st.caption(hint)
+        else:
+            _seed_parse_result(result, "photo")
     if demo:
-        st.session_state.parse_result = svc.load_demo_parse_result()
-        st.session_state.source = "demo"
-        go_to(2)
+        _seed_parse_result(svc.load_demo_parse_result(), "demo")
 
 
 def step_confirm() -> None:
     parse_result = st.session_state.parse_result
     if parse_result is None:
         go_to(1)
+        return
+    if st.session_state.editor_rows is None:
+        st.session_state.editor_rows = svc.rows_from_parse_result(parse_result)
+
+    # The review table has eight columns and, for a full pantry, many rows. Widen
+    # this step past the wizard's default reading column so nothing clips on the
+    # right, and size the editor to its row count below so the page (not a tiny
+    # inner scrollbar) handles a long pantry.
+    st.markdown(
+        "<style>.block-container { max-width: 1180px; }</style>",
+        unsafe_allow_html=True,
+    )
 
     st.subheader("Confirm your pantry")
     if st.session_state.source == "photo":
         st.caption(
-            "This is a preview parse (the vision model is not wired in yet). "
-            "Adjust anything below, then confirm."
+            "This is what we read from your photo. Uncheck anything you don't want "
+            "in the plan, fix a label or quantity, or add items by hand."
         )
     else:
-        st.caption("Adjust quantities, add or remove items, then confirm.")
+        st.caption(
+            "Uncheck anything you don't want in the plan, adjust quantities, or "
+            "add items by hand, then confirm."
+        )
 
     for warning in parse_result.warnings:
         st.warning(warning)
+    if parse_result.issues:
+        with st.expander(f"Review notes ({len(parse_result.issues)})", expanded=True):
+            for issue in parse_result.issues:
+                st.warning(f"**{issue.code}** - {issue.message}")
 
-    flagged = svc.flagged_items(parse_result)
+    # Size the editor to its rows (header + one dynamic add-row line + a hair) so
+    # every item shows and the page scrolls, instead of clipping inside a fixed
+    # ~10-row box. Capped so a huge pantry doesn't push everything else offscreen.
+    row_count = len(st.session_state.editor_rows)
+    editor_height = min(int((row_count + 2) * 35 + 3), 900)
+
+    edited = st.data_editor(
+        st.session_state.editor_rows,
+        key=f"pantry_editor_{st.session_state.editor_version}",
+        num_rows="dynamic",
+        use_container_width=True,
+        hide_index=True,
+        height=editor_height,
+        column_order=EDITOR_COLUMNS,
+        column_config={
+            "include": st.column_config.CheckboxColumn(
+                "Include", default=True, width="small", help="Only checked items go into the plan."
+            ),
+            "display_name": st.column_config.TextColumn("Ingredient", required=True, width="medium"),
+            "ingredient_id": st.column_config.TextColumn(
+                "Canonical ID", required=True, width="medium", help="Lowercase snake_case."
+            ),
+            "quantity_g": st.column_config.NumberColumn(
+                "Quantity (g)", min_value=0.0, step=1.0, format="%d g", width="small"
+            ),
+            "confidence": st.column_config.ProgressColumn(
+                "Confidence", min_value=0.0, max_value=1.0, format="%.2f", width="small"
+            ),
+            "source_text": st.column_config.TextColumn("Detected label", width="medium"),
+            "normalization_status": st.column_config.TextColumn("Mapping", width="small"),
+            "recipe_supported": st.column_config.CheckboxColumn("Used by recipes", width="small"),
+        },
+        disabled=("confidence", "source_text", "normalization_status", "recipe_supported"),
+    )
+
+    flagged = svc.flagged_rows(list(edited))
     if flagged:
-        names = ", ".join(it.display_name for it in flagged)
-        st.warning(f"Please double-check these before continuing: {names}")
+        st.warning(f"Please double-check these before continuing: {', '.join(flagged)}")
     else:
         st.success("Everything looks clear. Tweak anything you like, then confirm.")
 
-    rows = [
-        {
-            "ingredient_id": it.ingredient_id,
-            "display_name": it.display_name,
-            "quantity_g": it.quantity_g,
-            "confidence": round(it.confidence, 2) if it.confidence is not None else None,
-        }
-        for it in parse_result.items
-    ]
-    edited = st.data_editor(
-        rows,
-        num_rows="dynamic",
-        use_container_width=True,
-        key="pantry_editor",
-        column_config={
-            "ingredient_id": st.column_config.TextColumn("Ingredient id", required=True),
-            "display_name": st.column_config.TextColumn("Name"),
-            "quantity_g": st.column_config.NumberColumn("Grams", min_value=0, format="%d g"),
-            "confidence": st.column_config.NumberColumn(
-                "Confidence", min_value=0.0, max_value=1.0, format="%.2f"
-            ),
-        },
+    st.caption(
+        "Only checked rows are planned. Edit names and canonical IDs or remove "
+        "rows; a canonical ID must use lowercase snake_case."
     )
+
+    with st.expander("Add an ingredient manually"):
+        manual_name = st.text_input("Ingredient name", key="manual_ingredient_name")
+        if st.button("Add ingredient", use_container_width=True):
+            if not manual_name.strip():
+                st.warning("Enter an ingredient name first.")
+            else:
+                st.session_state.editor_rows = list(edited) + [
+                    svc.manual_ingredient_row(manual_name)
+                ]
+                st.session_state.editor_version += 1
+                st.rerun()
 
     back, forward = st.columns(2)
     if back.button("Back", use_container_width=True):
+        st.session_state.editor_rows = list(edited)
         go_to(1)
     if forward.button("Confirm pantry", type="primary", use_container_width=True):
-        st.session_state.pantry = svc.build_pantry_state(list(edited))
-        go_to(3)
+        try:
+            pantry = svc.pantry_from_rows(list(edited))
+        except (ValidationError, ValueError, TypeError) as exc:
+            st.error(f"Please fix the table before confirming: {exc}")
+        else:
+            if not pantry.items:
+                st.warning("Include at least one ingredient to build a plan.")
+            else:
+                st.session_state.editor_rows = list(edited)
+                st.session_state.pantry = pantry
+                go_to(3)
 
 
 def step_preferences() -> None:
@@ -339,43 +427,56 @@ def _badges_html(cuisine_tags, flags) -> str:
     return "".join(parts)
 
 
-def _day_card(day_plan) -> None:
+def _day_row(day_plan) -> None:
+    """One compact card per day: title, cuisine/flag badges, calories, cook time,
+    and how much is already on hand. The recipe's ingredients live in a collapsed
+    expander so the whole week reads at a glance."""
     recipe = day_plan.recipe
-    st.markdown(
-        f"<div class='pp-card'>"
-        f"<div class='pp-daykicker'>Day {day_plan.day}</div>"
-        f"<div class='pp-daytitle'>{recipe.title}</div>"
-        f"<div>{_badges_html(recipe.cuisine_tags, day_plan.flags)}</div>"
-        f"</div>",
-        unsafe_allow_html=True,
-    )
-
-    m1, m2, m3 = st.columns(3)
-    m1.metric(
-        "Calories",
-        f"{recipe.calories_per_serving} kcal",
-        delta=f"{day_plan.calorie_delta:+d} vs target",
-        delta_color="inverse",
-    )
-    m2.metric("Already on hand", f"{round(day_plan.pantry_coverage * 100)}%")
-    m3.metric("Cuisine", "Match" if day_plan.cuisine_match else "Cross")
-
-    chips = []
-    for ing in recipe.ingredients:
-        name = ing.display_name or ing.ingredient_id.replace("_", " ").title()
-        chips.append(f"<span class='pp-chip'>{name} · {int(ing.quantity_g)} g</span>")
-    st.markdown("**Ingredients**")
-    st.markdown(f"<div>{''.join(chips)}</div>", unsafe_allow_html=True)
+    with st.container(border=True):
+        head, meta = st.columns([3, 1])
+        with head:
+            st.markdown(
+                f"<span class='pp-daykicker'>Day {day_plan.day}</span>"
+                f"<div class='pp-daytitle'>{recipe.title}</div>"
+                f"<div>{_badges_html(recipe.cuisine_tags, day_plan.flags)}</div>",
+                unsafe_allow_html=True,
+            )
+        with meta:
+            st.markdown(
+                f"<div style='text-align:right'>"
+                f"<span class='pp-shop-qty'>{recipe.calories_per_serving} kcal</span><br>"
+                f"<span class='pp-shop-src'>{recipe.cook_time_min} min · "
+                f"{round(day_plan.pantry_coverage * 100)}% on hand</span>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+        with st.expander("Ingredients"):
+            chips = [
+                f"<span class='pp-chip'>"
+                f"{ing.display_name or ing.ingredient_id.replace('_', ' ').title()} · "
+                f"{int(ing.quantity_g)} g</span>"
+                for ing in recipe.ingredients
+            ]
+            st.markdown(f"<div>{''.join(chips)}</div>", unsafe_allow_html=True)
 
 
 def _shopping_list(plan) -> None:
+    n_days = len(plan.day_plans)
     st.markdown("### Shopping list")
+    st.caption(
+        f"One combined list for all {n_days} dinners, with shared ingredients "
+        "merged and anything already in your pantry subtracted."
+    )
     if not plan.shopping_list:
-        st.success("Nothing to buy - your pantry already covers the whole plan!")
+        st.success("Nothing to buy: your pantry already covers the whole plan!")
         return
+
+    titles = {d.recipe.recipe_id: d.recipe.title for d in plan.day_plans}
     for item in plan.shopping_list:
         name = item.display_name or item.ingredient_id.replace("_", " ").title()
-        recipes = ", ".join(r.replace("_", " ").title() for r in item.contributing_recipe_ids)
+        recipes = ", ".join(
+            titles.get(r, r.replace("_", " ").title()) for r in item.contributing_recipe_ids
+        )
         st.markdown(
             f"<div class='pp-shop-row'>"
             f"<span class='pp-shop-name'>{name}<br><span class='pp-shop-src'>for {recipes}</span></span>"
@@ -389,6 +490,7 @@ def step_results() -> None:
     plan = st.session_state.plan
     if plan is None:
         go_to(1)
+        return
 
     st.subheader("Your dinner plan")
 
@@ -400,39 +502,17 @@ def step_results() -> None:
         st.warning(svc.describe_warning(code))
 
     n_days = len(plan.day_plans)
-    if n_days < plan.requested_days:
-        st.info(f"Showing {n_days} of {plan.requested_days} requested days.")
-
     if n_days == 0:
         st.error("No plan could be built from this pantry and these preferences.")
         if st.button("Start over", type="primary"):
             reset_all()
         return
 
-    idx = min(st.session_state.day_index, n_days - 1)
+    if n_days < plan.requested_days:
+        st.info(f"Showing {n_days} of {plan.requested_days} requested days.")
 
-    # jump-to-day buttons
-    day_cols = st.columns(n_days)
-    for i, col in enumerate(day_cols):
-        if col.button(
-            f"Day {i + 1}",
-            key=f"jump_{i}",
-            type="primary" if i == idx else "secondary",
-            use_container_width=True,
-        ):
-            st.session_state.day_index = i
-            st.rerun()
-
-    _day_card(plan.day_plans[idx])
-
-    prev_col, mid_col, next_col = st.columns([1, 2, 1])
-    if prev_col.button("< Prev", use_container_width=True, disabled=idx == 0):
-        st.session_state.day_index = idx - 1
-        st.rerun()
-    mid_col.markdown(f"<div class='pp-daycount'>Day {idx + 1} of {n_days}</div>", unsafe_allow_html=True)
-    if next_col.button("Next >", use_container_width=True, disabled=idx == n_days - 1):
-        st.session_state.day_index = idx + 1
-        st.rerun()
+    for day_plan in plan.day_plans:
+        _day_row(day_plan)
 
     st.divider()
     _shopping_list(plan)

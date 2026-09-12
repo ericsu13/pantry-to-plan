@@ -16,9 +16,9 @@ PlanResult.trace / PlanResult.warnings / DayPlan.flags. Cross-cuisine widening
 reuses retriever.search with a broadened request copy, within its existing
 contract.
 
-The real adapter uses LangChain to call OpenAI. LangSmith tracing is
-intentionally NOT enabled for now (per product decision); nothing here imports
-langsmith or sets the LANGCHAIN_TRACING_V2 environment variables.
+The real adapter calls OpenAI directly (the openai>=2 Responses API with
+Pydantic structured output), matching vision.py's client pattern so the whole
+project shares one OpenAI client and one dependency.
 """
 
 from typing import Protocol
@@ -126,34 +126,39 @@ _RELAX_SYSTEM = (
 )
 
 
-class LangChainPlannerAdvisor:
-    """Real advisor backed by LangChain + OpenAI structured output.
+class OpenAIPlannerAdvisor:
+    """Real advisor backed by the OpenAI Responses API + Pydantic structured output.
 
-    langchain_openai is imported lazily so the planner and the fake-based tests
-    import fine without the dependency or an API key. Tracing is intentionally
-    left disabled.
+    openai is imported lazily so the planner and the fake-based tests import fine
+    without an API key. `temperature` suits gpt-4o (the default ADVISOR_MODEL);
+    drop it if ADVISOR_MODEL is pointed at a model that only allows the default.
     """
 
     def __init__(self, model: str | None = None, temperature: float = 0.0):
-        from langchain_openai import ChatOpenAI  # lazy: only needed for the live path
+        from openai import OpenAI  # lazy: only needed for the live path
 
         self.model_name = model or ADVISOR_MODEL
-        self._llm = ChatOpenAI(model=self.model_name, temperature=temperature)
+        self.temperature = temperature
+        self._client = OpenAI()  # reads OPENAI_API_KEY from the environment
 
     def plan_week(self, ctx: WeekContext) -> WeekProposal:
-        structured = self._llm.with_structured_output(WeekProposal)
-        return structured.invoke(
-            [
-                ("system", _WEEK_SYSTEM),
-                ("human", ctx.model_dump_json()),
-            ]
-        )
+        return self._decide(_WEEK_SYSTEM, ctx, WeekProposal)
 
     def choose_relaxation(self, ctx: RepairContext) -> RelaxationChoice:
-        structured = self._llm.with_structured_output(RelaxationChoice)
-        return structured.invoke(
-            [
-                ("system", _RELAX_SYSTEM),
-                ("human", ctx.model_dump_json()),
-            ]
+        return self._decide(_RELAX_SYSTEM, ctx, RelaxationChoice)
+
+    def _decide(self, system: str, ctx: BaseModel, output_model: type[BaseModel]):
+        """One structured Responses call: system prompt + JSON-encoded context in,
+        a validated `output_model` instance out."""
+        response = self._client.responses.parse(
+            model=self.model_name,
+            temperature=self.temperature,
+            input=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": ctx.model_dump_json()},
+            ],
+            text_format=output_model,
         )
+        if response.output_parsed is None:
+            raise RuntimeError("The advisor response was refused or could not be parsed.")
+        return response.output_parsed
