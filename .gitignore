@@ -8,3 +8,5 @@ venv/
 work/
 *.pyc
 _backup/
+
+.embeddings_cache/

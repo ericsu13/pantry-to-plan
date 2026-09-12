@@ -1,17 +1,13 @@
-"""Recipe corpus validation and embedding index builder.
+"""Recipe corpus validation and Pinecone indexing.
 
-Validates the recipe corpus at startup, ensuring:
-  - All required fields are present and valid
-  - Cuisine tags match the fixed set (italian, american, chinese, indian)
-  - Ingredient IDs are consistently formatted (lowercase snake_case)
-  - Quantities are positive numbers
+Validates the recipe corpus at startup, ensuring all required fields are valid.
+Then uploads recipes to Pinecone with OpenAI embeddings (text-embedding-3-small).
 
-Builds embeddings once and caches them locally so retrieval doesn't rebuild
-on every run. For the prototype, uses TfidfVectorizer on recipe titles +
-ingredients as a lightweight baseline; production can swap in sentence-transformers
-or a custom embedding model.
+For offline/testing, keeps TF-IDF as fallback, but primary indexing now uses
+OpenAI + Pinecone for all production retrieval.
 """
 
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -24,7 +20,7 @@ from recipes import RECIPES
 from schemas import Recipe
 
 # Configuration
-CACHE_DIR = Path(".embeddings_cache")
+CACHE_DIR = Path(__file__).resolve().parent / ".embeddings_cache"
 EMBEDDINGS_FILE = CACHE_DIR / "recipe_embeddings.json"
 VECTORIZER_FILE = CACHE_DIR / "vectorizer.json"
 
@@ -92,12 +88,118 @@ def validate_corpus() -> list[str]:
     return errors
 
 
-def build_embeddings() -> tuple[np.ndarray, dict[str, int]]:
-    """Build TF-IDF embeddings for all recipes.
+def recipe_text(recipe: Recipe) -> str:
+    ingredients = " ".join(ing.ingredient_id for ing in recipe.ingredients)
+    return f"{recipe.title} {ingredients} {' '.join(recipe.cuisine_tags)}"
+
+
+def corpus_fingerprint() -> str:
+    content = [(r.recipe_id, recipe_text(r)) for r in RECIPES]
+    return hashlib.sha256(json.dumps(content).encode()).hexdigest()
+
+
+def cached_cloud_embedding(client, text: str, model: str, dimensions: int) -> list[float]:
+    """Reuse vectors only when text, model and dimensions all match."""
+    key = hashlib.sha256(json.dumps([text, model, dimensions]).encode()).hexdigest()
+    folder = CACHE_DIR / "openai"
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / f"{key}.json"
+    try:
+        vector = json.loads(path.read_text())
+        if (isinstance(vector, list) and len(vector) == dimensions
+                and all(isinstance(x, (int, float)) and np.isfinite(x) for x in vector)):
+            return vector
+    except (OSError, ValueError):
+        pass
+    vector = client.embeddings.create(
+        model=model, input=text, dimensions=dimensions
+    ).data[0].embedding
+    if len(vector) != dimensions or not all(np.isfinite(x) for x in vector):
+        raise ValueError("Invalid embedding returned by provider")
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(json.dumps(vector))
+    temporary.replace(path)
+    return vector
+
+
+def index_recipes_to_pinecone() -> None:
+    """Upload all recipes to Pinecone with OpenAI embeddings.
+
+    Uses OpenAI's text-embedding-3-small (512 dims) to embed recipes.
+    Reuses cached embeddings and replaces records with the same IDs on re-runs.
+
+    Requires:
+        OPENAI_API_KEY
+        PINECONE_API_KEY
+        PINECONE_INDEX_NAME
+        OPENAI_EMBEDDING_DIMENSIONS (default 512)
+    """
+
+    # Check for required env vars
+    if not all([
+        os.environ.get("OPENAI_API_KEY"),
+        os.environ.get("PINECONE_API_KEY"),
+        os.environ.get("PINECONE_INDEX_NAME"),
+    ]):
+        raise ValueError("Set OPENAI_API_KEY, PINECONE_API_KEY and PINECONE_INDEX_NAME")
+
+    errors = validate_corpus()
+    if errors:
+        raise ValueError("Corpus validation failed:\n" + "\n".join(errors))
+    from openai import OpenAI
+    from pinecone import Pinecone
+
+    # Initialize clients
+    openai_client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+    embedding_model = os.environ.get("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
+    embedding_dims = int(os.environ.get("OPENAI_EMBEDDING_DIMENSIONS", "512"))
+
+    pc = Pinecone(api_key=os.environ["PINECONE_API_KEY"])
+    index = pc.Index(os.environ["PINECONE_INDEX_NAME"])
+    namespace = os.environ.get("PINECONE_NAMESPACE", "recipes")
+
+    print(f"Indexing {len(RECIPES)} recipes to Pinecone...")
+
+    # Prepare vectors to upsert
+    vectors_to_upsert = []
+
+    for recipe in RECIPES:
+        embedding_vector = cached_cloud_embedding(
+            openai_client, recipe_text(recipe), embedding_model, embedding_dims
+        )
+
+        # Prepare metadata
+        metadata = {
+            "recipe_id": recipe.recipe_id,
+            "title": recipe.title,
+            "cuisine_tags": recipe.cuisine_tags,
+            "vegetarian": recipe.vegetarian,
+            "calories_per_serving": recipe.calories_per_serving,
+        }
+
+        vectors_to_upsert.append((
+            recipe.recipe_id,
+            embedding_vector,
+            metadata
+        ))
+
+    # Upsert to Pinecone in batches
+    batch_size = 10
+    for i in range(0, len(vectors_to_upsert), batch_size):
+        batch = vectors_to_upsert[i:i + batch_size]
+        index.upsert(vectors=batch, namespace=namespace)
+        print(f"  ✓ Upserted {min(i + batch_size, len(vectors_to_upsert))}/{len(vectors_to_upsert)}")
+
+    print(f"✓ Pinecone indexing complete: {len(RECIPES)} recipes indexed")
+
+
+def build_embeddings() -> tuple[np.ndarray, dict[str, int], TfidfVectorizer]:
+    """Build TF-IDF embeddings for all recipes (fallback mode).
 
     Returns:
         embeddings: (n_recipes, n_features) array of embedding vectors
         recipe_index: dict mapping recipe_id to row index in embeddings array
+        vectorizer: fitted TfidfVectorizer for encoding new queries
     """
     recipe_index = {}
     texts = []
@@ -124,11 +226,12 @@ def build_embeddings() -> tuple[np.ndarray, dict[str, int]]:
 
 def save_embeddings(embeddings: np.ndarray, recipe_index: dict[str, int], vectorizer) -> None:
     """Cache embeddings and vectorizer to disk."""
-    CACHE_DIR.mkdir(exist_ok=True)
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
     # Save embeddings as JSON
     with open(EMBEDDINGS_FILE, "w") as f:
         json.dump({
+            "fingerprint": corpus_fingerprint(),
             "embeddings": embeddings.tolist(),
             "recipe_index": recipe_index,
         }, f)
@@ -151,6 +254,8 @@ def load_embeddings() -> Optional[tuple[np.ndarray, dict[str, int], dict]]:
     try:
         with open(EMBEDDINGS_FILE, "r") as f:
             data = json.load(f)
+            if data.get("fingerprint") != corpus_fingerprint():
+                return None
             embeddings = np.array(data["embeddings"])
             recipe_index = data["recipe_index"]
 
@@ -166,8 +271,10 @@ def load_embeddings() -> Optional[tuple[np.ndarray, dict[str, int], dict]]:
 def index_recipes(force_rebuild: bool = False) -> tuple[np.ndarray, dict[str, int], TfidfVectorizer]:
     """Load or build the recipe embedding index.
 
+    This function is entirely local, even when cloud credentials are configured.
+
     Args:
-        force_rebuild: If True, rebuild embeddings even if cache exists.
+        force_rebuild: If True, rebuild TF-IDF embeddings even if cache exists.
 
     Returns:
         embeddings: (n_recipes, n_features) array
@@ -189,12 +296,15 @@ def index_recipes(force_rebuild: bool = False) -> tuple[np.ndarray, dict[str, in
         if cached:
             embeddings, recipe_index, vectorizer_data = cached
             # Reconstruct vectorizer (we only need it for new queries)
-            vectorizer = TfidfVectorizer(vocabulary=vectorizer_data["vocabulary"])
+            vectorizer = TfidfVectorizer(
+                vocabulary=vectorizer_data["vocabulary"], lowercase=True,
+                stop_words="english", max_features=200, ngram_range=(1, 2),
+            )
             vectorizer.idf_ = np.array(vectorizer_data["idf"])
             return embeddings, recipe_index, vectorizer
 
     # Build from scratch
-    print("Building recipe embeddings...")
+    print("Building recipe embeddings (fallback TF-IDF)...")
     embeddings, recipe_index, vectorizer = build_embeddings()
     save_embeddings(embeddings, recipe_index, vectorizer)
 
@@ -202,12 +312,19 @@ def index_recipes(force_rebuild: bool = False) -> tuple[np.ndarray, dict[str, in
 
 
 if __name__ == "__main__":
-    # Validation and build for CLI
+    import argparse
+
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--backend", choices=("local", "pinecone"), default="local")
+    parser.add_argument("--force-rebuild", action="store_true", help="Rebuild local TF-IDF cache")
+    args = parser.parse_args()
     try:
-        embeddings, recipe_index, vectorizer = index_recipes(force_rebuild=True)
-        print(f"✓ Corpus valid: {len(RECIPES)} recipes")
-        print(f"✓ Embeddings built: shape {embeddings.shape}")
-        print(f"✓ Cache ready at {EMBEDDINGS_FILE}")
-    except ValueError as e:
-        print(f"✗ {e}")
-        exit(1)
+        if args.backend == "pinecone":
+            from dotenv import load_dotenv
+            load_dotenv(Path(__file__).resolve().parent / ".env")
+            index_recipes_to_pinecone()
+        else:
+            embeddings, _, _ = index_recipes(force_rebuild=args.force_rebuild)
+            print(f"Local index ready: {len(RECIPES)} recipes, shape {embeddings.shape}")
+    except ValueError as exc:
+        parser.exit(1, f"{exc}\n")

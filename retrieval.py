@@ -36,8 +36,8 @@ class Retriever(Protocol):
 
     def search(
         self,
-        request: PlanningRequest,
         pantry: PantryState,
+        request: PlanningRequest,
         top_k: int = 8,
     ) -> list[RecipeCandidate]:
         """Retrieve top-k recipe candidates matching the request and pantry.
@@ -58,8 +58,7 @@ class PineconeRetriever:
     """Cloud retriever using Pinecone + OpenAI embeddings.
 
     Uses OpenAI's text-embedding-3-small to embed queries and recipes.
-    Defaults to 512 dimensions (configurable via OPENAI_EMBEDDING_DIMENSIONS env var)
-    to reduce cost by ~2/3 vs default 1536-dim vectors.
+    Defaults to 512 dimensions (configurable via OPENAI_EMBEDDING_DIMENSIONS).
 
     Requires valid OPENAI_API_KEY and PINECONE_API_KEY environment variables.
 
@@ -93,8 +92,8 @@ class PineconeRetriever:
 
     def search(
         self,
-        request: PlanningRequest,
         pantry: PantryState,
+        request: PlanningRequest,
         top_k: int = 8,
     ) -> list[RecipeCandidate]:
         """Retrieve top-k recipe candidates using Pinecone.
@@ -104,13 +103,15 @@ class PineconeRetriever:
             - Requested cuisine tags
             - Goal (general/nutritional/kids)
 
-        Metadata filtering applied after Pinecone search:
-            - Recipes matching at least one requested cuisine
-            - If vegetarian_required=True, filter to vegetarian=True recipes
+        Vegetarian metadata is filtered in Pinecone and checked locally.
+        Cuisine mismatches remain available at a reduced score for fallback.
 
         Returns:
             Top-k RecipeCandidate objects, sorted by retrieval_score descending.
         """
+        if top_k <= 0:
+            raise ValueError("top_k must be positive")
+
         # Build search query from pantry and request
         query_text = self._build_query(request, pantry)
 
@@ -122,7 +123,9 @@ class PineconeRetriever:
             vector=query_vector,
             top_k=top_k * 2,  # Get more candidates for filtering
             namespace=self.namespace,
-            include_metadata=True
+            include_metadata=True,
+            **({"filter": {"vegetarian": {"$eq": True}}}
+               if request.vegetarian_required else {}),
         )
 
         # Process results and apply metadata filtering
@@ -132,7 +135,7 @@ class PineconeRetriever:
             score = float(match["score"])
 
             if recipe_id not in self.recipes_by_id:
-                continue
+                raise ValueError(f"UNKNOWN_RECIPE_ID: {recipe_id}")
 
             recipe = self.recipes_by_id[recipe_id]
 
@@ -143,7 +146,7 @@ class PineconeRetriever:
 
             # Metadata filter: vegetarian requirement
             if request.vegetarian_required and not recipe.vegetarian:
-                score *= 0.3
+                continue
 
             candidates.append((recipe_id, score))
 
@@ -162,7 +165,8 @@ class PineconeRetriever:
 
         # Add pantry ingredients
         for item in pantry.items:
-            parts.append(item.ingredient_id)
+            if item.quantity_g is not None and item.quantity_g > 0:
+                parts.append(item.ingredient_id)
 
         # Add cuisine preferences
         parts.extend(request.cuisines)
@@ -193,8 +197,8 @@ class LocalRetriever:
 
     def search(
         self,
-        request: PlanningRequest,
         pantry: PantryState,
+        request: PlanningRequest,
         top_k: int = 8,
     ) -> list[RecipeCandidate]:
         """Retrieve top-k recipe candidates.
@@ -204,9 +208,8 @@ class LocalRetriever:
             - Requested cuisine tags
             - Goal (general/nutritional/kids)
 
-        Filtering:
-            - Recipes matching at least one requested cuisine
-            - If vegetarian_required=True, filter to vegetarian=True recipes
+        Vegetarian recipes are required when requested. Cuisine mismatches
+        remain available at a reduced score for the planner fallback.
 
         Ranking:
             - TF-IDF cosine similarity between query and recipe embeddings
@@ -215,6 +218,9 @@ class LocalRetriever:
         Returns:
             Top-k RecipeCandidate objects, sorted by retrieval_score descending.
         """
+        if top_k <= 0:
+            raise ValueError("top_k must be positive")
+
         # Build search query from pantry and request
         query_text = self._build_query(request, pantry)
 
@@ -238,8 +244,8 @@ class LocalRetriever:
 
             # Metadata filter: vegetarian requirement
             if request.vegetarian_required and not recipe.vegetarian:
-                # Reduce score but don't exclude; constraints.py will enforce
-                score *= 0.3
+                # Exclude before top-k; the planner checks the gate again.
+                continue
 
             candidates.append((recipe, score))
 
@@ -267,7 +273,8 @@ class LocalRetriever:
 
         # Add pantry ingredients (prioritize these)
         for item in pantry.items:
-            parts.append(item.ingredient_id)
+            if item.quantity_g is not None and item.quantity_g > 0:
+                parts.append(item.ingredient_id)
 
         # Add cuisine preferences
         parts.extend(request.cuisines)
@@ -288,7 +295,7 @@ def create_retriever() -> Retriever:
         OPENAI_API_KEY: Required for Pinecone mode
         PINECONE_API_KEY: Required for Pinecone mode
         PINECONE_INDEX_NAME: Required for Pinecone mode
-        OPENAI_EMBEDDING_DIMENSIONS: Default 512 (reduces from 1536 to save cost)
+        OPENAI_EMBEDDING_DIMENSIONS: Default 512; must match the indexed recipe vectors
         RETRIEVAL_BACKEND: Optional; "pinecone" or "local" to force choice
 
     Pinecone Index Setup:
@@ -330,3 +337,36 @@ def create_retriever() -> Retriever:
 def create_local_retriever() -> Retriever:
     """Deprecated: Use create_retriever() instead."""
     return LocalRetriever()
+
+
+if __name__ == "__main__":
+    import argparse
+    import json
+    from pathlib import Path
+
+    from dotenv import load_dotenv
+    from schemas import PantryItem
+
+    parser = argparse.ArgumentParser(description="Search recipes using a pantry fixture")
+    parser.add_argument("--backend", choices=("local", "pinecone"), default="local")
+    parser.add_argument("--fixture", type=Path, default=Path(__file__).resolve().parent /
+                        "fixtures/01_well_stocked_veg_italian.json")
+    parser.add_argument("--top-k", type=int, default=5)
+    args = parser.parse_args()
+    load_dotenv(Path(__file__).resolve().parent / ".env")
+    fixture = json.loads(args.fixture.read_text())
+    pantry_data = dict(fixture["pantry"])
+    if isinstance(pantry_data["items"], dict):
+        pantry_data["items"] = [PantryItem(
+            ingredient_id=name, display_name=name.replace("_", " "),
+            quantity_g=quantity, confidence=1,
+        ) for name, quantity in pantry_data["items"].items()]
+    pantry = PantryState.model_validate(pantry_data)
+    request = PlanningRequest.model_validate(fixture["request"])
+    # Explicit backend selection: a cloud failure should be visible in this demo.
+    retriever = LocalRetriever() if args.backend == "local" else PineconeRetriever()
+    print(f"Backend: {args.backend}; fixture: {args.fixture.name}", flush=True)
+    for candidate in retriever.search(pantry, request, args.top_k):
+        recipe = get_recipe(candidate.recipe_id)
+        print(f"{candidate.retrieval_score:.4f}  {recipe.recipe_id}: {recipe.title} "
+              f"(vegetarian={recipe.vegetarian})")

@@ -190,3 +190,51 @@ Planned assertions (mechanical, not subjective):
    across days.
 5. **Shopping-list diff, eval, CLI**: get the eval script working before
    polishing the CLI; the eval is what proves the demo works.
+
+## Person 2: indexing and retrieval
+
+Requires Python 3.10 or newer. Install dependencies with `uv sync --python 3.12`.
+
+Build the local TF-IDF index (no API access or credentials needed):
+
+```bash
+uv run python index_recipes.py --backend local
+```
+
+Build the Pinecone index explicitly after creating an index whose dimension
+matches `OPENAI_EMBEDDING_DIMENSIONS` (default 512):
+
+```bash
+uv run python index_recipes.py --backend pinecone
+```
+
+The cloud setup command loads `.env` and requires `OPENAI_API_KEY`,
+`PINECONE_API_KEY`, and `PINECONE_INDEX_NAME`. Recipe embeddings are cached under
+`.embeddings_cache/openai/`, keyed by recipe text, embedding model, and dimensions.
+Repeated setup reuses those vectors and upserts current recipe metadata.
+
+Set `RETRIEVAL_BACKEND=local` to force offline retrieval. Local retrieval never
+calls cloud indexing, even with credentials configured. The factory also falls
+back locally when cloud initialization fails; query-time failures are still
+reported to the caller. Both backends use
+`search(pantry, request, top_k)` and exclude non-vegetarian recipes when required.
+Pinecone queries apply the vegetarian metadata filter and reject unknown IDs.
+Cuisine mismatches remain candidates for the planner's explicit fallback.
+
+Run the planner and retrieval tests without live API calls:
+
+```bash
+uv run python -m unittest discover -s tests
+```
+
+Run retrieval directly with the included vegetarian Italian pantry fixture:
+
+```bash
+uv run python retrieval.py --backend local
+uv run python retrieval.py --backend pinecone
+```
+
+Use `--top-k 8` to change the result count or `--fixture fixtures/03_tight_band_indian.json`
+to use another fixture. The CLI loads `.env` and prints recipe IDs, titles,
+retrieval scores, and vegetarian status. Explicit Pinecone mode reports cloud
+errors instead of silently switching backends.
