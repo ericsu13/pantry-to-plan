@@ -1,16 +1,17 @@
 # Pantry to Plan
 
 Turn a pantry photo into a 3 to 5 day dinner plan and a consolidated shopping
-list. This is a five-hour prototype: one contiguous, demoable pipeline, with
-any complexity that does not prove the core loop cut rather than deferred.
+list. The application combines image-based ingredient detection, a human review
+step, preference-aware recipe planning, pantry depletion, and shopping-list
+aggregation in one Streamlit workflow.
 
 Full spec: [Pantry to Plan PRD](https://docs.google.com/document/d/1tc3IKXzLXF_MYZABZueAzt01adY4Mr-4/edit)
 
 ## Goal
 
-Prove that vision parsing, recipe retrieval, deterministic scoring, an optional
-hard vegetarian filter, pantry depletion, and shopping-list aggregation can work
-as one understandable flow within a five-hour build window.
+Provide an understandable end-to-end flow that combines vision parsing, recipe
+retrieval, deterministic scoring, an optional hard vegetarian filter, pantry
+depletion, and shopping-list aggregation.
 
 ```
 pantry photo  ->  preferences + vegetarian gate  ->  meal plan  ->  shopping list
@@ -27,33 +28,47 @@ pantry photo  ->  preferences + vegetarian gate  ->  meal plan  ->  shopping lis
    vegetarian recipes.
 3. Get a 3 to 5 day plan where each day's recipe roughly matches the cuisine,
    roughly hits the calorie target, is vegetarian whenever that hard constraint
-   is enabled, and prefers ingredients already on hand.
-4. See a shopping list of what is missing across the plan.
+   is enabled, and prefers ingredients already on hand. Recipe cards use the
+   matching image from `images/` and provide expandable ingredients and cooking
+   instructions.
+4. See a consolidated shopping list of what is missing across the plan.
 
 ## Running the UI
 
+Requires Python 3.11 or newer. The recommended setup uses
+[uv](https://docs.astral.sh/uv/):
+
+```bash
+uv sync
+uv run streamlit run app.py
 ```
+
+Alternatively, use a standard virtual environment:
+
+```bash
+python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 .venv/bin/streamlit run app.py
 ```
 
-The UI ([app.py](app.py)) is a thin Streamlit wizard: upload a pantry photo (or
-click "Use the demo pantry"), confirm and adjust the parsed items, set
-preferences, then get a day-by-day plan and shopping list. All non-widget logic
-lives in [app_services.py](app_services.py); Streamlit only holds UI state and
-confirmed typed objects. Preferences load from `preferences.default.json` and
-persist to `preferences.json` (gitignored) when changed.
+The UI ([app.py](app.py)) is a four-step Streamlit wizard: upload a pantry photo
+(or click "Use the demo pantry"), confirm and adjust the parsed items, set
+preferences, then view a day-by-day plan and shopping list. The interface uses
+the visual assets in `assets/ui/` and recipe images in `images/`. Non-widget
+application logic lives in [app_services.py](app_services.py); Streamlit holds
+the current pantry and plan in session state. Preferences load from
+`preferences.default.json` and persist to `preferences.json` (gitignored) when
+changed.
 
 The confirm step is a human-in-the-loop review table (shared with the standalone
 [vision_app.py](vision_app.py)): each detected item has an **Include** toggle
 (checked by default, only checked rows are planned), editable name / canonical ID
 / quantity, and read-only signals from the vision + normalization pass:
 **Confidence** as a bar, the **Detected label**, the **Mapping** status (exact /
-alias / unmapped), and whether the ingredient is **Used by recipes**. A
-"double-check these" banner recomputes live from the table (low confidence or
-missing quantity), and an "Add an ingredient manually" control normalizes typed
-names into the corpus vocabulary. Vegetarian is off by default; enable it in the
-Preferences step to apply the hard gate.
+alias / unmapped). A "double-check these" banner recomputes live from the table
+(low confidence or missing quantity), and an "Add an ingredient manually"
+control normalizes typed names into the corpus vocabulary. Vegetarian is off by
+default; enable it in the Preferences step to apply the hard gate.
 
 Retrieval is live: [app_services.py](app_services.py) `get_retriever()` calls
 `retrieval.create_retriever()`, which defaults to `auto` (query Pinecone when
@@ -68,10 +83,6 @@ deterministic planner otherwise.
 
 ## Architecture
 
-![Technical solution architecture: OpenAI vision and embeddings, Pinecone retrieval, Python scoring in a per-day loop, and a thin persistence interface, producing day plans, a shopping list, and constraint flags](docs/pantry-to-plan-architecture.png)
-
-*Figure 2: Technical solution architecture and daily planning loop.*
-
 - **OpenAI (GPT-4o)** handles image understanding, structured/JSON output, and
   query embeddings (`text-embedding-3-small`).
 - **Pinecone** stores the recipe corpus and retrieves a small candidate set per
@@ -80,16 +91,18 @@ deterministic planner otherwise.
   ingredients and quantities.
 - **Python** enforces the vegetarian gate again, applies exact scoring rules,
   and updates pantry state.
-- **Persistence** (pantry state, generated day plans) goes through a thin
-  `memory.py` interface so the storage choice stays isolated. Default to a local
-  JSON file unless mem0 is explicitly a requirement to demo; either way the rest
-  of the code only calls `save_pantry`, `update_pantry`, `append_day_plan`,
-  `load_pantry`, `load_day_plans`. The recipe corpus lives in Pinecone, kept
-  separate from the "what is true now / what happened" store.
+- **State management** keeps the current pantry and generated plan in Streamlit
+  session state for the active browser session. User preferences are the only
+  application data persisted locally, in the gitignored `preferences.json`.
+  The typed recipe corpus in [recipes.py](recipes.py) remains the source of truth
+  for recipe details regardless of retrieval backend.
 
 ## The daily loop
 
-A simple for-loop over 3 to 5 days. No retries, no relax loop, just best-match.
+The default planner uses a simple for-loop over 3 to 5 days with no retries or
+relaxation loop. When smart planning is enabled, the optional advisor can use
+the bounded whole-week and relax-and-repair strategies described in
+[Agentic planning](#agentic-planning-opt-in).
 
 For each day:
 1. Build a query from the current pantry plus cuisine preference, embed it, and
@@ -104,8 +117,8 @@ For each day:
    plans that still favor the best matches. If nothing eligible matches the
    cuisine, fall back to the closest calorie match and flag it. There is no
    substitution logic, just a flag. Never fall back to a non-vegetarian recipe.
-4. Subtract the recipe's ingredients from the in-memory pantry, persist the
-   updated state, and append the `DayPlan`.
+4. Subtract the recipe's ingredients from the in-memory pantry and append the
+   `DayPlan` to the current result.
 
 Then aggregate: the list of `DayPlan`s plus a shopping list (sum of all recipe
 ingredients minus the final pantry state), and report which days missed a
@@ -195,34 +208,29 @@ bounds at module boundaries.
 
 ## Repository layout
 
-Current state:
-
-Module ownership follows the implementation blueprint (P1 vision/schemas, P2
-corpus/retrieval, P3 planner/inventory, P4 UI/evals).
-
-| File | Purpose | Owner | Status |
-|---|---|---|---|
-| [schemas.py](schemas.py) | Core Pydantic contracts | P1 | done |
-| [config.py](config.py) | Score weights, goal->band mapping, settings | shared | done |
-| [recipes.py](recipes.py) | 40-recipe corpus, 10 per cuisine, >=4 vegetarian each | P2 | done |
-| [repository.py](repository.py) | Recipe corpus loading + id lookup | shared | done |
-| [generate_fixtures.py](generate_fixtures.py) | Builds eval fixtures from the corpus | P4 | done |
-| [fixtures/](fixtures/) | 23 eval scenarios (see [fixtures/README.md](fixtures/README.md)) | P1/P4 | done |
-| [constraints.py](constraints.py) | Hard eligibility (vegetarian gate) | P3 | done |
-| [scoring.py](scoring.py) | Score components + stable tie-break + softmax select | P3 | done |
-| [inventory.py](inventory.py) | Pantry depletion + shopping-list reconciliation | P3 | done |
-| [pipeline.py](pipeline.py) | N-day loop (greedy default + agentic strategies) + aggregation | P3 | done |
-| [advisor.py](advisor.py) | Injected LLM decider for agentic planning (+ fake) | P3 | done |
-| [tests/](tests/) | Planner, retrieval, scenario, and schema-validation tests | P1/P2/P3 | done |
-| [vision.py](vision.py) | Validated image -> raw detection -> `PantryParseResult` | P1 | done |
-| [normalization.py](normalization.py) | Raw labels -> corpus-backed ingredient IDs | P1 | done |
-| [vision_app.py](vision_app.py) | Independent upload, review, confirmation UI | P1 | done |
-| [retrieval.py](retrieval.py) | Retriever protocol + local/Pinecone adapters | P2 | done |
-| [index_recipes.py](index_recipes.py) | Build/cache embeddings, ensure index (create/guard dims), upsert to Pinecone | P2 | done |
-| [app.py](app.py) | Streamlit wizard UI | P4 | done |
-| [app_services.py](app_services.py) | UI-supporting logic (prefs, pantry, retrieval, run) | P4 | done |
-| `explanations.py` | Evidence -> grounded reason text | P4 | todo |
-| `evals/run_eval.py` | Fixture suite -> `EvaluationSummary` | P4 | todo |
+| Path | Purpose |
+|---|---|
+| [app.py](app.py) | Redesigned Streamlit wizard, recipe cards, and shopping-list UI |
+| [app_services.py](app_services.py) | UI-supporting preference, pantry, retrieval, and planning logic |
+| [assets/ui/](assets/ui/) | Decorative interface assets used across the wizard |
+| [images/](images/) | Recipe images, named to match recipe titles |
+| [schemas.py](schemas.py) | Shared strict Pydantic contracts |
+| [config.py](config.py) | Score weights, goal-to-band mapping, and settings |
+| [recipes.py](recipes.py) | 40-recipe typed corpus with ingredients and cooking instructions |
+| [repository.py](repository.py) | Recipe corpus loading and ID lookup |
+| [constraints.py](constraints.py) | Hard eligibility rules, including the vegetarian gate |
+| [scoring.py](scoring.py) | Score components, stable tie-break, and softmax selection |
+| [inventory.py](inventory.py) | Pantry depletion and shopping-list reconciliation |
+| [pipeline.py](pipeline.py) | Default and agent-assisted planning strategies plus aggregation |
+| [advisor.py](advisor.py) | Optional LLM planning advisor and deterministic test double |
+| [vision.py](vision.py) | Validated image detection producing `PantryParseResult` |
+| [normalization.py](normalization.py) | Raw labels mapped to corpus-backed ingredient IDs |
+| [vision_app.py](vision_app.py) | Standalone upload, review, and confirmation UI |
+| [retrieval.py](retrieval.py) | Retriever protocol and local/Pinecone adapters |
+| [index_recipes.py](index_recipes.py) | Local index build and Pinecone indexing workflow |
+| [fixtures/](fixtures/) | 23 evaluation scenarios; see [fixtures/README.md](fixtures/README.md) |
+| [generate_fixtures.py](generate_fixtures.py) | Regenerates evaluation fixtures from the corpus |
+| [tests/](tests/) | Planner, retrieval, scenario, vision, UI-service, and schema tests |
 
 The PRD calls for `recipes.json`; this repo uses [recipes.py](recipes.py)
 instead (typed `Recipe` objects, directly importable, no parse step). The
@@ -239,7 +247,7 @@ fallback, tight calorie band, vegetarian exhaustion) plus happy paths, join
 mismatches, sizing edges, and vision-noise cases with unclear or poorly-labeled
 pantry items.
 
-Planned assertions (mechanical, not subjective):
+The suite verifies mechanical invariants rather than subjective recipe quality:
 - Every planned day produces exactly one `DayPlan`; a short plan is allowed only
   when a hard constraint leaves no unused recipe, and the reason is reported.
 - With `vegetarian_required=True`, every selected recipe is vegetarian.
@@ -255,25 +263,12 @@ Planned assertions (mechanical, not subjective):
 Run the complete local suite from the repository root:
 
 ```bash
-python -m unittest discover -s tests -v
+uv run python -m unittest discover -s tests -v
 ```
 
-## Build order
+## Indexing and retrieval
 
-1. **Corpus + schemas** (done): unblocks everything, no dependencies.
-2. **Vision parse**: one OpenAI call, image in, structured JSON out. Highest
-   risk, do it early against 1 to 2 real photos.
-3. **Retrieval**: build the Pinecone index, upsert the corpus, write the per-day
-   query with the vegetarian metadata filter. Test standalone first.
-4. **Planner**: day loop against a fake pantry first, then wire in real vision
-   output and persistence. Confirm pantry depletion actually changes choices
-   across days.
-5. **Shopping-list diff, eval, CLI**: get the eval script working before
-   polishing the CLI; the eval is what proves the demo works.
-
-## Person 2: indexing and retrieval
-
-Requires Python 3.11 or newer. Install dependencies with `uv sync --python 3.12`.
+Install the project dependencies with `uv sync` before running these commands.
 
 Build the local TF-IDF index (no API access or credentials needed):
 
@@ -344,7 +339,7 @@ The vision feature has three boundaries:
 Run the full pipeline without an API key:
 
 ```bash
-python examples/run_vision_mock.py
+uv run python examples/run_vision_mock.py
 ```
 
 Run one live request:
@@ -353,13 +348,13 @@ Run one live request:
 export OPENAI_API_KEY="your-key"
 # Optional override; the default is gpt-4o.
 export OPENAI_VISION_MODEL="gpt-4o"
-python examples/run_vision_live.py
+uv run python examples/run_vision_live.py
 ```
 
 Run the independent vision UI:
 
 ```bash
-streamlit run vision_app.py
+uv run streamlit run vision_app.py
 ```
 
 The UI ends by displaying and downloading `confirmed_pantry.json`, whose schema
@@ -369,7 +364,7 @@ planning pipeline, so planning can be developed and integrated independently.
 You may pass a different image to the live script:
 
 ```bash
-python examples/run_vision_live.py /path/to/pantry-photo.jpg
+uv run python examples/run_vision_live.py /path/to/pantry-photo.jpg
 ```
 
 Common maintenance points:
