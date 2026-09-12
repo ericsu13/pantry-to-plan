@@ -9,6 +9,8 @@ work/
 *.pyc
 _backup/
 
+.embeddings_cache/
+
 # Runtime UI state written by app.py; the committed defaults live in
 # preferences.default.json.
 preferences.json
