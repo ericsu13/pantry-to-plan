@@ -40,18 +40,28 @@ def _load_env_demo() -> None:
     """Load KEY=VALUE lines from .env.demo into the process environment so the
     demo picks up OPENAI_API_KEY (and friends) without a shell export. Existing
     environment values win, so a real export is never overridden. The file is
-    gitignored and never logged."""
-    if not ENV_DEMO_FILE.exists():
-        return
-    for raw in ENV_DEMO_FILE.read_text().splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, _, value = line.partition("=")
-        key = key.strip()
-        value = value.strip().strip('"').strip("'")
-        if key and key not in os.environ:
-            os.environ[key] = value
+    gitignored and never logged.
+
+    LangSmith/LangChain tracing vars are intentionally NOT loaded: this project
+    does not enable tracing, and pulling them in points LangChain at a LangSmith
+    endpoint whose key 403s and floods stderr. We force tracing off below.
+    """
+    if ENV_DEMO_FILE.exists():
+        for raw in ENV_DEMO_FILE.read_text().splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            key = key.strip()
+            if key.upper().startswith(("LANGSMITH", "LANGCHAIN")):
+                continue
+            value = value.strip().strip('"').strip("'")
+            if key and key not in os.environ:
+                os.environ[key] = value
+
+    # Belt and suspenders: keep LangChain from calling LangSmith at all.
+    os.environ["LANGSMITH_TRACING"] = "false"
+    os.environ["LANGCHAIN_TRACING_V2"] = "false"
 
 
 # Populate the environment from .env.demo at import so advisor_status() and the
