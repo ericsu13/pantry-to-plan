@@ -30,25 +30,6 @@ pantry photo  ->  preferences + vegetarian gate  ->  meal plan  ->  shopping lis
    is enabled, and prefers ingredients already on hand.
 4. See a shopping list of what is missing across the plan.
 
-## Running the UI
-
-```
-.venv/bin/pip install -r requirements.txt
-.venv/bin/streamlit run app.py
-```
-
-The UI ([app.py](app.py)) is a thin Streamlit wizard: upload a pantry photo (or
-click "Use the demo pantry"), confirm and adjust the parsed items, set
-preferences, then get a day-by-day plan and shopping list. All non-widget logic
-lives in [app_services.py](app_services.py); Streamlit only holds UI state and
-confirmed typed objects. Preferences load from `preferences.default.json` and
-persist to `preferences.json` (gitignored) when changed. Because `vision.py`
-(P1) and `retrieval.py` (P2) are not built yet, the app falls back to the demo
-pantry for the parse step and a local corpus retriever for planning, and
-auto-upgrades to the real modules once they land. The opt-in "smart planning"
-toggle uses the `LangChainPlannerAdvisor` when `OPENAI_API_KEY` is set and
-degrades to the deterministic planner otherwise.
-
 ## Architecture
 
 ![Technical solution architecture: OpenAI vision and embeddings, Pinecone retrieval, Python scoring in a per-day loop, and a thin persistence interface, producing day plans, a shopping list, and constraint flags](docs/pantry-to-plan-architecture.png)
@@ -132,47 +113,22 @@ same plan. The eval and invariant tests use `temperature=0`; a dedicated test
 class exercises the sampled path across many seeds and confirms no hard
 constraint is ever violated.
 
-## Agentic planning (opt-in)
-
-Two optional strategies let a model shape the plan without ever touching the
-arithmetic. They activate only when a `PlannerAdvisor` is injected into
-`generate_plan(..., advisor=...)`; with no advisor the default greedy loop
-above runs unchanged. The governing rule is **agent proposes, deterministic
-core disposes**: the advisor only decides *what to try*, while scoring,
-eligibility, the vegetarian gate, depletion, and shopping-list reconciliation
-stay in deterministic Python.
-
-- **Whole-week planning (#3)**: the advisor proposes an ordered week from the
-  scored candidate pool, optimizing cross-day goals (minimize the shopping list,
-  deplete the pantry smartly, keep variety). The core then validates every
-  proposed recipe (unknown id, repeat, or vegetarian violation is dropped) and
-  materializes it, so no proposal can break an invariant.
-- **Relax-and-repair (#1)**: when a day cannot be filled, the advisor picks one
-  relaxation from a fixed menu (`ALLOW_REPEAT`, `CROSS_CUISINE`, `GIVE_UP`) and
-  the core applies it deterministically. Crossing into another cuisine is a
-  flagged last resort (`cross_cuisine` flag, `RELAXED_CROSS_CUISINE` warning).
-  The loop is bounded by `config.MAX_RELAXATION_ROUNDS`, and the vegetarian gate
-  is never on the menu, so it is never relaxed.
-
-The real advisor ([advisor.py](advisor.py) `LangChainPlannerAdvisor`) calls
-OpenAI via LangChain with structured output; LangSmith tracing is not enabled.
-Tests and evals inject `FakePlannerAdvisor`, a deterministic double, so the
-agentic path is reproducible with no API key. Every agent decision is surfaced
-through the existing `PlanResult.trace`, `PlanResult.warnings`, and
-`DayPlan.flags` fields, so these strategies touch neither the P1 schemas nor the
-P2 corpus/retrieval contracts.
-
 ## Data model
 
-See [schemas.py](schemas.py) (Pydantic models, frozen shared contracts per the
-implementation blueprint): `PantryItem`, `PantryParseResult`, `PantryState`,
+See [schemas.py](schemas.py) (strict Pydantic models shared across modules):
+`PantryItemCandidate`, `PantryItem`, `PantryParseResult`, `PantryState`,
 `PlanningRequest`, `Recipe`, `RecipeIngredient`, `RecipeCandidate`,
 `CandidateScore`, `EligibilityResult`, `DayPlan`, `Shortage`,
 `ShoppingListItem`, `AppIssue`, `PlanResult`, and the eval types
 (`CaseEvaluation`, `EvaluationSummary`). Everything is normalized to grams; unit
 conversion is out of scope. Ingredient ids are lowercase snake_case (e.g.
 `chicken_breast`) and are the join key across pantry, recipes, and shopping
-list.
+list. The local recognition catalog currently contains 205 canonical IDs: all
+96 recipe ingredient IDs plus 109 commonly encountered foods.
+`PantryItemCandidate` is machine-proposed vision output;
+`PantryItem` inside `PantryState` is user-confirmed planner input. Models reject
+unknown fields and enforce quantity, confidence, coverage, day, and identifier
+bounds at module boundaries.
 
 ## Repository layout
 
@@ -190,17 +146,16 @@ corpus/retrieval, P3 planner/inventory, P4 UI/evals).
 | [generate_fixtures.py](generate_fixtures.py) | Builds eval fixtures from the corpus | P4 | done |
 | [fixtures/](fixtures/) | 23 eval scenarios (see [fixtures/README.md](fixtures/README.md)) | P1/P4 | done |
 | [constraints.py](constraints.py) | Hard eligibility (vegetarian gate) | P3 | done |
-| [scoring.py](scoring.py) | Score components + stable tie-break + softmax select | P3 | done |
+| [scoring.py](scoring.py) | Score components + stable tie-break | P3 | done |
 | [inventory.py](inventory.py) | Pantry depletion + shopping-list reconciliation | P3 | done |
-| [pipeline.py](pipeline.py) | N-day loop (greedy default + agentic strategies) | P3 | done |
-| [advisor.py](advisor.py) | Injected LLM decider for agentic planning (+ fake) | P3 | done |
-| [tests/](tests/) | Planner invariant + scenario tests | P3 | done |
-| [app.py](app.py) | Streamlit wizard UI | P4 | done |
-| [app_services.py](app_services.py) | UI-supporting logic (prefs, pantry, run) | P4 | done |
-| `vision.py` | OpenAI vision call -> `PantryParseResult` | P1 | todo |
-| `normalization.py` | Aliases -> canonical ingredient ids | P1 | todo |
+| [pipeline.py](pipeline.py) | Fixed N-day loop + aggregation | P3 | done |
+| [tests/](tests/) | Planner invariant, scenario, and schema-validation tests | P3/P1 | done |
+| [vision.py](vision.py) | Validated image -> raw detection -> `PantryParseResult` | P1 | done |
+| [normalization.py](normalization.py) | Raw labels -> corpus-backed ingredient IDs | P1 | done |
+| [vision_app.py](vision_app.py) | Independent upload, review, confirmation UI | P1 | done |
 | `retrieval.py` | Retriever protocol + local/Pinecone adapters | P2 | todo |
 | `explanations.py` | Evidence -> grounded reason text | P4 | todo |
+| `app.py` | Streamlit UI | P4 | todo |
 | `evals/run_eval.py` | Fixture suite -> `EvaluationSummary` | P4 | todo |
 
 The PRD calls for `recipes.json`; this repo uses [recipes.py](recipes.py)
@@ -211,7 +166,7 @@ retrieval index-build reads from it and writes the Pinecone metadata
 ## Eval
 
 Automated checks that the loop does what it claims, run against fixed fixtures
-directly against `planner.py` (no subprocess, no live vision call), so they are
+directly against `pipeline.py` (no subprocess, no live vision call), so they are
 cheap to run repeatedly. The [fixtures/](fixtures/) folder holds 23 scenarios
 covering the four required cases (well-stocked vegetarian, sparse pantry with
 fallback, tight calorie band, vegetarian exhaustion) plus happy paths, join
@@ -228,6 +183,14 @@ Planned assertions (mechanical, not subjective):
 - Pantry never goes negative across day mutations.
 - The final shopping list lists only ingredients still short, with
   `quantity_g > 0`.
+- Schema contracts reject malformed IDs, invalid confidence values,
+  contradictory eligibility results, and unexpected fields.
+
+Run the complete local suite from the repository root:
+
+```bash
+python -m unittest discover -s tests -v
+```
 
 ## Build order
 
@@ -241,3 +204,60 @@ Planned assertions (mechanical, not subjective):
    across days.
 5. **Shopping-list diff, eval, CLI**: get the eval script working before
    polishing the CLI; the eval is what proves the demo works.
+
+## Vision development
+
+The vision feature has three boundaries:
+
+1. `OpenAIVisionProvider` or `MockVisionProvider` returns `RawVisionResult`.
+2. `IngredientNormalizer` maps each raw label to the recipe-corpus vocabulary.
+3. `parse_pantry_image` returns `PantryParseResult` for human confirmation.
+
+Run the full pipeline without an API key:
+
+```bash
+python examples/run_vision_mock.py
+```
+
+Run one live request:
+
+```bash
+export OPENAI_API_KEY="your-key"
+# Optional override; the default is gpt-5.6-luna.
+export OPENAI_VISION_MODEL="gpt-5.6-luna"
+python examples/run_vision_live.py
+```
+
+Run the independent vision UI:
+
+```bash
+streamlit run vision_app.py
+```
+
+The UI ends by displaying and downloading `confirmed_pantry.json`, whose schema
+is `PantryState`. It never imports or runs retrieval, scoring, inventory, or the
+planning pipeline, so planning can be developed and integrated independently.
+
+You may pass a different image to the live script:
+
+```bash
+python examples/run_vision_live.py /path/to/pantry-photo.jpg
+```
+
+Common maintenance points:
+
+- Add recognized foods to `data/ingredient_catalog.json`.
+- Add semantic label mappings such as `capsicum -> bell_pepper` to
+  `data/ingredient_aliases.json`.
+- Add or change corpus ingredient IDs in `recipes.py`; the normalizer discovers
+  its authoritative vocabulary from that corpus automatically.
+- Tune `DEFAULT_LOW_CONFIDENCE` in `vision.py` to change which detections the UI
+  asks the user to review.
+- Keep recipe recommendation, scoring, and inventory depletion out of the
+  vision prompt; those remain deterministic downstream responsibilities.
+
+Recognition and recipe support are deliberately separate. For example,
+`dragon_fruit` is a recognized catalog item and `pitaya` is one of its aliases,
+but `recipe_supported` remains false until at least one recipe in `recipes.py`
+uses `dragon_fruit`. An entirely unknown label is preserved with
+`normalization_status="unmapped"` for correction in the confirmation UI.
