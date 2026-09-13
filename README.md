@@ -60,8 +60,7 @@ the current pantry and plan in session state. Preferences load from
 `preferences.default.json` and persist to `preferences.json` (gitignored) when
 changed.
 
-The confirm step is a human-in-the-loop review table (shared with the standalone
-[vision_app.py](vision_app.py)): each detected item has an **Include** toggle
+The confirm step is a human-in-the-loop review table: each detected item has an **Include** toggle
 (checked by default, only checked rows are planned), editable name / canonical ID
 / quantity, and read-only signals from the vision + normalization pass:
 **Confidence** as a bar, the **Detected label**, the **Mapping** status (exact /
@@ -225,9 +224,8 @@ bounds at module boundaries.
 | [advisor.py](advisor.py) | Optional LLM planning advisor and deterministic test double |
 | [vision.py](vision.py) | Validated image detection producing `PantryParseResult` |
 | [normalization.py](normalization.py) | Raw labels mapped to corpus-backed ingredient IDs |
-| [vision_app.py](vision_app.py) | Standalone upload, review, and confirmation UI |
-| [retrieval.py](retrieval.py) | Retriever protocol and local/Pinecone adapters |
-| [index_recipes.py](index_recipes.py) | Local index build and Pinecone indexing workflow |
+| [retrieval.py](retrieval.py) | Retriever protocol with Pinecone (OpenAI embeddings) and TF-IDF local adapters |
+| [index_recipes.py](index_recipes.py) | Corpus validation, Pinecone indexing, and TF-IDF local index build |
 | [fixtures/](fixtures/) | 23 evaluation scenarios; see [fixtures/README.md](fixtures/README.md) |
 | [generate_fixtures.py](generate_fixtures.py) | Regenerates evaluation fixtures from the corpus |
 | [tests/](tests/) | Planner, retrieval, scenario, vision, UI-service, and schema tests |
@@ -266,17 +264,47 @@ Run the complete local suite from the repository root:
 uv run python -m unittest discover -s tests -v
 ```
 
-## Indexing and retrieval
+## Indexing and retrieval (RAG)
 
-Install the project dependencies with `uv sync` before running these commands.
+Recipe recommendation is retrieval-augmented: rather than asking a model to
+recall recipes, the app embeds each recipe once at index time, embeds the live
+pantry-and-preferences query at plan time, and retrieves the nearest recipes by
+vector similarity. The retrieved IDs are only candidates. Exact ingredients,
+quantities, calories, and cuisine tags are always resolved from the typed corpus
+in [recipes.py](recipes.py) via `repository.get_recipe()`, never inferred by the
+model. This keeps recall smart while the numbers that drive scoring, depletion,
+and the shopping list stay exact and deterministic.
 
-Build the local TF-IDF index (no API access or credentials needed):
+### How the app uses it
 
-```bash
-uv run python index_recipes.py --backend local
-```
+[app.py](app.py) does not talk to a backend directly. Its planning step calls
+[app_services.py](app_services.py) `get_retriever()`, which delegates to
+`retrieval.create_retriever()` and defaults to the `auto` backend:
 
-Build the Pinecone index:
+- **Pinecone (primary)**: when `OPENAI_API_KEY`, `PINECONE_API_KEY`, and
+  `PINECONE_INDEX_NAME` are set (and the index is built), each day's query is
+  embedded with OpenAI `text-embedding-3-small` and sent to Pinecone, which
+  returns the top-k nearest recipes by cosine similarity. When vegetarian is
+  required, a `vegetarian=true` metadata filter is applied in the query itself;
+  cuisine mismatches are not dropped but down-weighted (score halved) so they
+  remain available for the planner's explicit fallback.
+- **TF-IDF local (fallback)**: with no credentials, or on any Pinecone
+  initialization/search error, `auto` transparently falls back to an in-memory
+  TF-IDF retriever over the same corpus, reports the fallback once, and stays
+  local for the lifetime of that retriever. For the 40-recipe corpus this is
+  fast, offline, and deterministic. Empty results and unknown recipe IDs do not
+  trigger fallback.
+
+Both backends expose the same `search(pantry, request, top_k)` interface and
+exclude non-vegetarian recipes when required, so the planner is agnostic to
+which one answered. Set `RETRIEVAL_BACKEND=local` to force offline retrieval
+even when credentials are present, or `RETRIEVAL_BACKEND=pinecone` to require
+the cloud path and surface errors instead of silently switching.
+
+### Building the Pinecone index
+
+Install dependencies with `uv sync`, then populate the index (this is what makes
+the primary path usable; without it, `auto` stays on TF-IDF):
 
 ```bash
 uv run python index_recipes.py --backend pinecone
@@ -285,27 +313,26 @@ uv run python index_recipes.py --backend pinecone
 This embeds each recipe with OpenAI `text-embedding-3-small` (client-side) and
 upserts dense vectors, so the index must be a plain dense index whose dimension
 matches `OPENAI_EMBEDDING_DIMENSIONS` (default 512), not a Pinecone
-integrated/semantic index. The build now manages that for you: it creates the
-index if missing (dense, cosine, serverless; `PINECONE_CLOUD` / `PINECONE_REGION`
+integrated/semantic index. The build manages that for you: it creates the index
+if missing (dense, cosine, serverless; `PINECONE_CLOUD` / `PINECONE_REGION`
 override the default `aws` / `us-east-1`), reuses it when it already exists at the
 right dimension, and stops with a clear error if it exists at a different
 dimension (for example a stale 1024-dim integrated index) rather than silently
 producing an unqueryable index. To fix a flagged mismatch, delete and recreate
 the index at the expected dimension, or set `OPENAI_EMBEDDING_DIMENSIONS` to match.
 
-The cloud setup command loads `.env` and requires `OPENAI_API_KEY`,
-`PINECONE_API_KEY`, and `PINECONE_INDEX_NAME`. Recipe embeddings are cached under
-`.embeddings_cache/openai/`, keyed by recipe text, embedding model, and dimensions.
-Repeated setup reuses those vectors and upserts current recipe metadata.
+The build loads `.env` and requires `OPENAI_API_KEY`, `PINECONE_API_KEY`, and
+`PINECONE_INDEX_NAME`. It upserts recipe metadata (`cuisine_tags`,
+`calories_per_serving`, `vegetarian`) used for query-time filtering. Recipe
+embeddings are cached under `.embeddings_cache/`, keyed by recipe text, embedding
+model, and dimensions, so re-running reuses vectors and only re-upserts metadata.
 
-Set `RETRIEVAL_BACKEND=local` to force offline retrieval. Local retrieval never
-calls cloud indexing, even with credentials configured. The factory defaults to `auto`: it tries Pinecone and falls back locally
-on missing credentials or cloud initialization/search errors. It reports the
-fallback and stays local for the lifetime of that retriever. Empty results and
-unknown recipe IDs do not trigger fallback. Both backends use
-`search(pantry, request, top_k)` and exclude non-vegetarian recipes when required.
-Pinecone queries apply the vegetarian metadata filter and reject unknown IDs.
-Cuisine mismatches remain candidates for the planner's explicit fallback.
+The offline TF-IDF index needs no credentials and is built on demand the first
+time the local retriever runs; you can also build it explicitly:
+
+```bash
+uv run python index_recipes.py --backend local
+```
 
 Run the planner and retrieval tests without live API calls:
 
@@ -313,59 +340,28 @@ Run the planner and retrieval tests without live API calls:
 uv run python -m unittest discover -s tests
 ```
 
-Run retrieval directly with the included vegetarian Italian pantry fixture.
-Omitting `--backend` uses `RETRIEVAL_BACKEND` when set, otherwise `auto`:
+## Vision
 
-```bash
-uv run python retrieval.py
-uv run python retrieval.py --backend auto
-uv run python retrieval.py --backend local
-uv run python retrieval.py --backend pinecone
-```
+The photo step in [app.py](app.py) is wired to [vision.py](vision.py) through
+[app_services.py](app_services.py) `parse_pantry_image()`. When `OPENAI_API_KEY`
+is set it runs the live parse; without a key (or on a checkout missing
+vision.py) it falls back to the bundled demo pantry so the wizard stays runnable
+end to end. A hard vision failure is surfaced to the UI rather than swallowed.
 
-Use `--top-k 8` to change the result count or `--fixture fixtures/03_tight_band_indian.json`
-to use another fixture. The CLI loads `.env` and prints recipe IDs, titles,
-retrieval scores, and vegetarian status. Explicit Pinecone mode reports cloud
-errors instead of silently switching backends.
+The parse has three boundaries:
 
-## Vision development
+1. `OpenAIVisionProvider` (GPT-4o, override with `OPENAI_VISION_MODEL`) returns a
+   `RawVisionResult` of detected labels with confidences.
+2. `IngredientNormalizer` maps each raw label to the recipe-corpus vocabulary
+   (exact / alias / unmapped), discovering its authoritative ingredient IDs from
+   the corpus.
+3. `parse_pantry_image` returns a `PantryParseResult`, which the confirm step
+   renders as the human-in-the-loop review table before anything is planned.
 
-The vision feature has three boundaries:
-
-1. `OpenAIVisionProvider` or `MockVisionProvider` returns `RawVisionResult`.
-2. `IngredientNormalizer` maps each raw label to the recipe-corpus vocabulary.
-3. `parse_pantry_image` returns `PantryParseResult` for human confirmation.
-
-Run the full pipeline without an API key:
-
-```bash
-uv run python examples/run_vision_mock.py
-```
-
-Run one live request:
-
-```bash
-export OPENAI_API_KEY="your-key"
-# Optional override; the default is gpt-4o.
-export OPENAI_VISION_MODEL="gpt-4o"
-uv run python examples/run_vision_live.py
-```
-
-Run the independent vision UI:
-
-```bash
-uv run streamlit run vision_app.py
-```
-
-The UI ends by displaying and downloading `confirmed_pantry.json`, whose schema
-is `PantryState`. It never imports or runs retrieval, scoring, inventory, or the
-planning pipeline, so planning can be developed and integrated independently.
-
-You may pass a different image to the live script:
-
-```bash
-uv run python examples/run_vision_live.py /path/to/pantry-photo.jpg
-```
+Detections at or below `LOW_CONFIDENCE_THRESHOLD` (or missing a quantity) are
+flagged for review on the confirm step. The vision parse never does recipe
+recommendation, scoring, or inventory depletion; those stay deterministic and
+downstream.
 
 Common maintenance points:
 
