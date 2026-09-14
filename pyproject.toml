@@ -12,6 +12,7 @@ dependencies = [
     "streamlit>=1.40,<2",
     "pinecone>=4.0.0",
     "python-dotenv>=1.0.0",
+    "langsmith>=0.3.13,<1",
 ]
 
 [project.optional-dependencies]

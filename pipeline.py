@@ -59,6 +59,7 @@ from schemas import (
     TraceEvent,
 )
 from scoring import score_recipe, softmax_select
+from telemetry import trace_span
 
 
 class Retriever(Protocol):
@@ -194,37 +195,42 @@ def _greedy_plan(
     request, retriever, top_k, rng, temperature, low, high, current, used, day_plans, warnings, trace
 ) -> PantryState:
     for day in range(1, request.days + 1):
-        candidates = retriever.search(current, request, top_k)
-        trace.append(
-            TraceEvent(
-                step="retrieve",
-                day=day,
-                message=f"retrieved {len(candidates)} candidate(s)",
-                data={"ids": [c.recipe_id for c in candidates]},
-            )
-        )
-
-        scores = _resolve_and_score(candidates, current, request, used, day, trace, warnings)
-        selectable = _selectable(scores, used, allow_repeat=False, allow_cross_cuisine=False)
-        if not selectable:
-            warnings.append("NO_ELIGIBLE_RECIPE")
+        with trace_span(
+            f"planner_day_{day}",
+            inputs={"day": day, "pantry": current.model_dump()},
+            metadata={"planner_mode": "deterministic"},
+        ):
+            candidates = retriever.search(current, request, top_k)
             trace.append(
                 TraceEvent(
-                    step="select",
+                    step="retrieve",
                     day=day,
-                    message="no eligible unused recipe for the requested cuisine; "
-                    "returning a partial plan (hard constraint not relaxed)",
+                    message=f"retrieved {len(candidates)} candidate(s)",
+                    data={"ids": [c.recipe_id for c in candidates]},
                 )
             )
-            break
 
-        chosen = softmax_select(selectable, rng, temperature)
-        recipe = get_recipe(chosen.recipe_id)
-        current = _append_day(
-            day, chosen, recipe, request, low, high, False, day_plans, trace, current,
-            {"temperature": temperature, "sampled_from": len(selectable)},
-        )
-        used.add(recipe.recipe_id)
+            scores = _resolve_and_score(candidates, current, request, used, day, trace, warnings)
+            selectable = _selectable(scores, used, allow_repeat=False, allow_cross_cuisine=False)
+            if not selectable:
+                warnings.append("NO_ELIGIBLE_RECIPE")
+                trace.append(
+                    TraceEvent(
+                        step="select",
+                        day=day,
+                        message="no eligible unused recipe for the requested cuisine; "
+                        "returning a partial plan (hard constraint not relaxed)",
+                    )
+                )
+                break
+
+            chosen = softmax_select(selectable, rng, temperature)
+            recipe = get_recipe(chosen.recipe_id)
+            current = _append_day(
+                day, chosen, recipe, request, low, high, False, day_plans, trace, current,
+                {"temperature": temperature, "sampled_from": len(selectable)},
+            )
+            used.add(recipe.recipe_id)
     return current
 
 
