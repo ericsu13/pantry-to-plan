@@ -8,8 +8,10 @@ ingredient, initial pantry + shopping quantity must cover total planned demand.
 """
 
 from schemas import DayPlan, PantryState, Recipe, ShoppingListItem, Shortage
+from telemetry import traced
 
 
+@traced(name="inventory_update", run_type="tool")
 def apply_recipe(pantry: PantryState, recipe: Recipe) -> tuple[PantryState, list[Shortage]]:
     """Subtract one serving of `recipe` from `pantry`; return (new_state, shortages)."""
     # Deep-copy items so the caller's state is untouched.
@@ -38,6 +40,7 @@ def apply_recipe(pantry: PantryState, recipe: Recipe) -> tuple[PantryState, list
     return new_state, shortages
 
 
+@traced(name="shopping_list_reconciliation", run_type="tool")
 def build_shopping_list(
     day_plans: list[DayPlan], initial_pantry: PantryState
 ) -> list[ShoppingListItem]:

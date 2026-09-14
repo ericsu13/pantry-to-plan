@@ -258,6 +258,18 @@ The suite verifies mechanical invariants rather than subjective recipe quality:
 - Schema contracts reject malformed IDs, invalid confidence values,
   contradictory eligibility results, and unexpected fields.
 
+The LangSmith evaluation harness lives in [evaluation/](evaluation/). Its first
+smoke workflow uploads Golden Dataset v1, filters to one case, and runs only
+`PTP-001` with local TF-IDF retrieval, no advisor, and `temperature=0`:
+
+```bash
+export LANGSMITH_API_KEY="..."
+uv run python -m evaluation.run_eval --case-id PTP-001 --mode deterministic --upload
+```
+
+See [evaluation/README.md](evaluation/README.md) for dataset immutability,
+metrics, trace structure, and the local-only command.
+
 Run the complete local suite from the repository root:
 
 ```bash

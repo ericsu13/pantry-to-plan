@@ -20,6 +20,7 @@ import random
 from config import SCORE_WEIGHTS
 from constraints import validate_eligibility
 from schemas import CandidateScore, PantryState, PlanningRequest, Recipe
+from telemetry import traced
 
 
 def pantry_quantities(pantry: PantryState) -> dict[str, float]:
@@ -36,6 +37,7 @@ def _calorie_score(calorie_delta: int, target: int) -> float:
     return max(0.0, 1.0 - abs(calorie_delta) / max(target, 1))
 
 
+@traced(name="scoring", run_type="tool")
 def score_recipe(
     recipe: Recipe,
     pantry: PantryState,

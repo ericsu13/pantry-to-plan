@@ -8,8 +8,10 @@ and is never relaxed or downgraded to a warning.
 """
 
 from schemas import AppIssue, EligibilityResult, PlanningRequest, Recipe
+from telemetry import traced
 
 
+@traced(name="constraint_check", run_type="tool")
 def validate_eligibility(recipe: Recipe, request: PlanningRequest) -> EligibilityResult:
     reject_reasons: list[AppIssue] = []
 
