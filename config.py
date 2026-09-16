@@ -48,10 +48,10 @@ ADVISOR_MODEL = "gpt-4o"     # OpenAI model for the live advisor (env-overridabl
 # Single-agent MCP planner. The model chooses which MCP tool to call next, but
 # these bounds and the deterministic final validator retain operational control.
 MCP_AGENT_MODEL = "gpt-4o"
-MCP_MAX_TOOL_CALLS = 12
-MCP_MAX_PLAN_REVISIONS = 2
-MCP_TOOL_TIMEOUT_SECONDS = 10.0
-MCP_AGENT_TOTAL_TIMEOUT_SECONDS = 30.0
+MCP_MAX_TOOL_CALLS = 15
+MCP_MAX_PLAN_REVISIONS = 3
+MCP_TOOL_TIMEOUT_SECONDS = 30.0
+MCP_AGENT_TOTAL_TIMEOUT_SECONDS = 120.0
 
 # Selection temperature for the per-day pick. The planner samples among the
 # eligible, in-cuisine, unused candidates with probability proportional to
