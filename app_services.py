@@ -16,6 +16,7 @@ import os
 import random
 from pathlib import Path
 import sys
+import traceback
 
 from config import ALL_CUISINES, GOAL_CALORIE_TOLERANCE
 from inventory import build_shopping_list  # noqa: F401  (re-exported for callers/tests)
@@ -399,6 +400,7 @@ def run_plan(
                 f"Agent + MCP fallback: {type(exc).__name__}: {exc}",
                 file=sys.stderr,
                 )
+            traceback.print_exception(exc, file=sys.stderr)
             emit("Agent + MCP planning was unavailable; using the standard planner.")
             retriever = get_retriever()
             from config import load_settings
