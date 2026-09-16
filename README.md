@@ -76,9 +76,11 @@ index is built, otherwise TF-IDF local). Set `RETRIEVAL_BACKEND=local` to force
 the offline path. The photo step is wired to [vision.py](vision.py): with
 `OPENAI_API_KEY` set it runs the live vision parse, and without a key (or if
 vision.py is absent) it falls back to the bundled demo pantry so the wizard stays
-runnable end to end. The opt-in "smart planning" toggle uses the
-`OpenAIPlannerAdvisor` when `OPENAI_API_KEY` is set and degrades to the
-deterministic planner otherwise.
+runnable end to end. When `OPENAI_API_KEY` is available, the UI also offers an
+**Agent + MCP planner**. One planning agent discovers and chooses grounded MCP
+tools, observes their results, simulates a week, and must obtain deterministic
+final approval. If the model or MCP session fails, the same request
+automatically runs through the standard planner and is marked as a fallback.
 
 ## Architecture
 
@@ -188,6 +190,49 @@ deterministic double, so the agentic path is reproducible with no API key. Every
 agent decision is surfaced through `PlanResult.trace`, `PlanResult.warnings`, and
 `DayPlan.flags`.
 
+## Single agent + MCP planning
+
+The `mcp_agent` mode is a tool-use loop rather than a fixed sequence of model
+calls. `mcp_planner_agent.py` gives one model the planning goal and tool schemas
+discovered from `meal_tools_server.py`. The model chooses the next tool and its
+arguments, receives the observation, and may revise its proposal. The
+controller bounds this autonomy to 12 tool calls, two rejected-plan revisions,
+and 30 seconds by default.
+
+| MCP tool | Deterministic implementation |
+|---|---|
+| `search_recipes` | `retrieval.py` (Pinecone/OpenAI or local TF-IDF) |
+| `get_recipe_details` | `repository.py` trusted corpus lookup |
+| `evaluate_candidates` | `constraints.py` and `scoring.py` |
+| `simulate_plan` | `pipeline.py` and `inventory.py` |
+| `validate_final_plan` | Mandatory corpus, constraint, depletion, and shopping-list gate |
+
+The model never supplies recipe facts, scores, quantities, or shopping-list
+arithmetic. It chooses what to investigate and which grounded IDs to propose.
+The Streamlit result page displays the mode, tool trajectory, revision count,
+validator outcome, and a score-grounded explanation for each meal.
+
+The local stdio MCP server is launched automatically by the client; no second
+terminal is required:
+
+### Recommended live-demo configuration
+
+The default agent limits are intentionally conservative. For a live OpenAI
+agent run, the following settings were tested successfully:
+
+```bash
+export OPENAI_API_KEY="..."
+export MCP_AGENT_ENABLED=true
+export MCP_AGENT_TOTAL_TIMEOUT_SECONDS=120
+export MCP_TOOL_TIMEOUT_SECONDS=30
+export MCP_MAX_TOOL_CALLS=15
+export MCP_MAX_PLAN_REVISIONS=3
+
+uv run streamlit run app.py
+
+```
+
+
 ## Data model
 
 See [schemas.py](schemas.py) (strict Pydantic models shared across modules):
@@ -222,6 +267,10 @@ bounds at module boundaries.
 | [inventory.py](inventory.py) | Pantry depletion and shopping-list reconciliation |
 | [pipeline.py](pipeline.py) | Default and agent-assisted planning strategies plus aggregation |
 | [advisor.py](advisor.py) | Optional LLM planning advisor and deterministic test double |
+| [mcp_planner_agent.py](mcp_planner_agent.py) | Bounded single-agent MCP tool-selection loop |
+| [meal_tools_server.py](meal_tools_server.py) | Local MCP server exposing five grounded planning tools |
+| [meal_tools_client.py](meal_tools_client.py) | Stdio MCP discovery and invocation client |
+| [mcp_models.py](mcp_models.py) | Typed MCP, tool, and agent-turn contracts |
 | [vision.py](vision.py) | Validated image detection producing `PantryParseResult` |
 | [normalization.py](normalization.py) | Raw labels mapped to corpus-backed ingredient IDs |
 | [retrieval.py](retrieval.py) | Retriever protocol with Pinecone (OpenAI embeddings) and TF-IDF local adapters |
@@ -274,6 +323,13 @@ Run the complete local suite from the repository root:
 
 ```bash
 uv run python -m unittest discover -s tests -v
+```
+
+Run the reproducible 23-case MCP-agent evaluation over the real local stdio
+transport (no OpenAI key required):
+
+```bash
+uv run python -m evaluation.run_mcp_agent_eval
 ```
 
 ## Indexing and retrieval (RAG)

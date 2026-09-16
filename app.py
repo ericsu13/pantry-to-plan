@@ -360,7 +360,7 @@ def _init_state() -> None:
         "editor_version": 0,    # bumped to re-seed the editor after a manual add
         "pantry": None,         # confirmed PantryState
         "prefs": None,          # preferences dict
-        "use_advisor": False,   # UI toggle
+        "planner_mode": "standard",  # standard | mcp_agent
         "plan": None,           # PlanResult
         "day_index": 0,
         "source": None,         # "photo" | "demo"
@@ -771,17 +771,30 @@ def step_preferences() -> None:
             )
 
     with st.container(border=True):
-        st.markdown("<div class='pp-section-label'>✨ AI smart planning</div>", unsafe_allow_html=True)
-        advisor_available, _advisor_reason = svc.advisor_status()
-        use_advisor = st.toggle(
-            "Smart planning (agentic)",
-            value=advisor_available,
-            disabled=not advisor_available,
-            help="Let a model shape the whole week and repair days that can't be filled. "
-            "The deterministic core still enforces every constraint.",
+        st.markdown("<div class='pp-section-label'>✨ Planning mode</div>", unsafe_allow_html=True)
+        mcp_available, mcp_reason = svc.mcp_agent_status()
+        mode_options = ["Standard planner"]
+        if mcp_available:
+            mode_options.append("Agent + MCP planner")
+        current_label = (
+            "Agent + MCP planner"
+            if st.session_state.planner_mode == "mcp_agent" and mcp_available
+            else "Standard planner"
         )
-        if not advisor_available:
-            st.caption("AI Smart Planning is unavailable until AI configuration is enabled.")
+        mode_label = st.radio(
+            "Choose how the plan is built",
+            options=mode_options,
+            index=mode_options.index(current_label),
+            help="Agent + MCP lets one planning agent choose and call grounded recipe, "
+            "scoring, simulation, and validation tools. Python retains final authority.",
+        )
+        if not mcp_available:
+            st.caption(f"Agent + MCP is unavailable: {mcp_reason}")
+        else:
+            st.caption(
+                "The agent may search, compare, simulate, and revise. The deterministic "
+                "validator still enforces dietary rules and exact inventory arithmetic."
+            )
 
     if not cuisines:
         st.warning("Pick at least one cuisine to build a plan.")
@@ -804,24 +817,23 @@ def step_preferences() -> None:
     }
     svc.save_preferences(new_prefs)
     st.session_state.prefs = new_prefs
-    st.session_state.use_advisor = bool(use_advisor and advisor_available)
+    st.session_state.planner_mode = (
+        "mcp_agent" if mode_label == "Agent + MCP planner" else "standard"
+    )
 
     request = svc.build_request(new_prefs)
-    advisor = svc.build_advisor() if st.session_state.use_advisor else None
 
     with st.status("Cooking up your plan...", expanded=True) as status:
         def progress(msg: str) -> None:
             st.write(msg)
             time.sleep(0.35)
 
-        try:
-            plan = svc.run_plan(st.session_state.pantry, request, advisor=advisor, progress=progress)
-        except Exception:  # noqa: BLE001 - agentic path can fail on a live call; degrade gracefully
-            if advisor is not None:
-                st.write("Smart planning hit a snag; using the standard planner instead.")
-                plan = svc.run_plan(st.session_state.pantry, request, advisor=None, progress=progress)
-            else:
-                raise
+        plan = svc.run_plan(
+            st.session_state.pantry,
+            request,
+            mode=st.session_state.planner_mode,
+            progress=progress,
+        )
         status.update(label="Your plan is ready!", state="complete")
 
     st.session_state.plan = plan
@@ -881,6 +893,13 @@ def _day_row(day_plan) -> None:
         with st.expander("Instructions"):
             steps = "".join(f"<li>{html.escape(step)}</li>" for step in recipe.instructions)
             st.markdown(f"<ol class='pp-steps'>{steps}</ol>", unsafe_allow_html=True)
+        if day_plan.score is not None:
+            score = day_plan.score
+            st.caption(
+                f"Why this meal: {coverage}% of ingredients were on hand, "
+                f"the calorie difference is {score.calorie_delta:+d} kcal, and "
+                f"{'it matches' if day_plan.cuisine_match else 'it relaxes'} your cuisine preference."
+            )
 
 
 def _shopping_list(plan) -> None:
@@ -951,6 +970,36 @@ def step_results() -> None:
         with summary_b:
             st.metric("Items to buy", len(plan.shopping_list))
     st.markdown("<div style='height:0.5rem'></div>", unsafe_allow_html=True)
+
+    agent_events = [
+        event for event in plan.trace
+        if event.step in {"agent_start", "mcp_tool", "agent_complete", "agent_fallback"}
+    ]
+    with st.expander("How this plan was created", expanded=bool(agent_events)):
+        if any(event.step == "agent_complete" for event in agent_events):
+            st.markdown("**Mode:** Single planning agent using local MCP tools")
+            complete = next(event for event in agent_events if event.step == "agent_complete")
+            data = complete.data or {}
+            st.caption(
+                f"Tool calls: {data.get('tool_calls', '—')} · "
+                f"Plan revisions: {data.get('revisions', '—')} · "
+                "Final authority: deterministic Python validator"
+            )
+        elif any(event.step == "agent_fallback" for event in agent_events):
+            st.markdown("**Mode:** Standard planner after safe Agent + MCP fallback")
+        else:
+            st.markdown("**Mode:** Standard deterministic planner")
+
+        visible_events = [
+            event for event in plan.trace
+            if event.step in {
+                "agent_start", "mcp_tool", "agent_complete", "agent_fallback",
+                "retrieve", "select", "deplete"
+            }
+        ]
+        for event in visible_events:
+            day = f"Day {event.day}: " if event.day is not None else ""
+            st.write(f"• {day}{event.message}")
 
     day_columns = st.columns(n_days, gap="small")
     for column, day_plan in zip(day_columns, plan.day_plans):

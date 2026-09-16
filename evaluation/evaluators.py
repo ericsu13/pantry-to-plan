@@ -135,6 +135,11 @@ def _fixture_checks(inputs: dict, predicted: dict, expected: dict) -> dict[str, 
             actual = bool(days) and 0 < sum(coverages) / len(coverages) < 1
         elif key == "shopping_list_small_or_empty":
             actual = len(predicted.get("shopping_list", [])) <= 5
+        elif key == "cross_cuisine_flagged":
+            actual = (
+                "RELAXED_CROSS_CUISINE" in warnings
+                and any("cross_cuisine" in day.get("flags", []) for day in days)
+            )
         elif key == "unrecognized_items_ignored":
             final = {item["ingredient_id"]: item.get("quantity_g") for item in predicted.get("final_pantry", [])}
             actual = bool(unknown_inputs) and all(
@@ -245,4 +250,3 @@ def json_comment(value: dict) -> str:
     import json
 
     return json.dumps(value, sort_keys=True)
-

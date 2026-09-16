@@ -1,0 +1,616 @@
+[
+  {
+    "case_id": "PTP-001",
+    "hard_constraint_pass": true,
+    "fixture_expectation_checks": {
+      "all_vegetarian": true,
+      "all_cuisine_match": true,
+      "all_within_calorie_band": true,
+      "fallback_flags": true,
+      "days_returned": true
+    },
+    "fixture_expectation_score": 1.0,
+    "inventory_correct": true,
+    "shopping_list_correct": true,
+    "trajectory_pass": true,
+    "failure_recovery_applicable": false,
+    "failure_recovery_pass": true,
+    "guardrail_violations": {
+      "vegetarian_violations": 0,
+      "negative_inventory_events": 0,
+      "invalid_recipe_ids_materialized": 0,
+      "unreported_hard_constraint_failures": 0,
+      "invalid_shopping_list_quantities": 0
+    },
+    "overall_case_pass": true,
+    "latency_ms": 1908.125,
+    "tool_calls": 5,
+    "error": null
+  },
+  {
+    "case_id": "PTP-002",
+    "hard_constraint_pass": true,
+    "fixture_expectation_checks": {
+      "low_pantry_coverage": true,
+      "all_cuisine_match": true,
+      "at_least_one_fallback": true,
+      "days_returned": true
+    },
+    "fixture_expectation_score": 1.0,
+    "inventory_correct": true,
+    "shopping_list_correct": true,
+    "trajectory_pass": true,
+    "failure_recovery_applicable": true,
+    "failure_recovery_pass": true,
+    "guardrail_violations": {
+      "vegetarian_violations": 0,
+      "negative_inventory_events": 0,
+      "invalid_recipe_ids_materialized": 0,
+      "unreported_hard_constraint_failures": 0,
+      "invalid_shopping_list_quantities": 0
+    },
+    "overall_case_pass": true,
+    "latency_ms": 1873.765,
+    "tool_calls": 5,
+    "error": null
+  },
+  {
+    "case_id": "PTP-003",
+    "hard_constraint_pass": true,
+    "fixture_expectation_checks": {
+      "all_cuisine_match": true,
+      "all_within_calorie_band": true,
+      "every_day_flagged_out_of_band": true,
+      "days_returned": true
+    },
+    "fixture_expectation_score": 1.0,
+    "inventory_correct": true,
+    "shopping_list_correct": true,
+    "trajectory_pass": true,
+    "failure_recovery_applicable": false,
+    "failure_recovery_pass": true,
+    "guardrail_violations": {
+      "vegetarian_violations": 0,
+      "negative_inventory_events": 0,
+      "invalid_recipe_ids_materialized": 0,
+      "unreported_hard_constraint_failures": 0,
+      "invalid_shopping_list_quantities": 0
+    },
+    "overall_case_pass": true,
+    "latency_ms": 1833.852,
+    "tool_calls": 5,
+    "error": null
+  },
+  {
+    "case_id": "PTP-004",
+    "hard_constraint_pass": true,
+    "fixture_expectation_checks": {
+      "all_vegetarian": true,
+      "no_non_vegetarian_selected": true,
+      "days_returned": true,
+      "reports_constraint_prevented_completion": true,
+      "cross_cuisine_flagged": true
+    },
+    "fixture_expectation_score": 1.0,
+    "inventory_correct": true,
+    "shopping_list_correct": true,
+    "trajectory_pass": true,
+    "failure_recovery_applicable": true,
+    "failure_recovery_pass": true,
+    "guardrail_violations": {
+      "vegetarian_violations": 0,
+      "negative_inventory_events": 0,
+      "invalid_recipe_ids_materialized": 0,
+      "unreported_hard_constraint_failures": 0,
+      "invalid_shopping_list_quantities": 0
+    },
+    "overall_case_pass": true,
+    "latency_ms": 1878.899,
+    "tool_calls": 5,
+    "error": null
+  },
+  {
+    "case_id": "PTP-005",
+    "hard_constraint_pass": true,
+    "fixture_expectation_checks": {
+      "low_pantry_coverage": true,
+      "all_pantry_coverage_zero": true,
+      "all_cuisine_match": true,
+      "days_returned": true
+    },
+    "fixture_expectation_score": 1.0,
+    "inventory_correct": true,
+    "shopping_list_correct": true,
+    "trajectory_pass": true,
+    "failure_recovery_applicable": true,
+    "failure_recovery_pass": true,
+    "guardrail_violations": {
+      "vegetarian_violations": 0,
+      "negative_inventory_events": 0,
+      "invalid_recipe_ids_materialized": 0,
+      "unreported_hard_constraint_failures": 0,
+      "invalid_shopping_list_quantities": 0
+    },
+    "overall_case_pass": true,
+    "latency_ms": 1880.421,
+    "tool_calls": 5,
+    "error": null
+  },
+  {
+    "case_id": "PTP-006",
+    "hard_constraint_pass": true,
+    "fixture_expectation_checks": {
+      "all_cuisine_match": true,
+      "high_pantry_coverage": true,
+      "days_returned": true
+    },
+    "fixture_expectation_score": 1.0,
+    "inventory_correct": true,
+    "shopping_list_correct": true,
+    "trajectory_pass": true,
+    "failure_recovery_applicable": false,
+    "failure_recovery_pass": true,
+    "guardrail_violations": {
+      "vegetarian_violations": 0,
+      "negative_inventory_events": 0,
+      "invalid_recipe_ids_materialized": 0,
+      "unreported_hard_constraint_failures": 0,
+      "invalid_shopping_list_quantities": 0
+    },
+    "overall_case_pass": true,
+    "latency_ms": 1936.423,
+    "tool_calls": 5,
+    "error": null
+  },
+  {
+    "case_id": "PTP-007",
+    "hard_constraint_pass": true,
+    "fixture_expectation_checks": {
+      "all_vegetarian": true,
+      "all_cuisine_match": true,
+      "all_within_calorie_band": true,
+      "days_returned": true
+    },
+    "fixture_expectation_score": 1.0,
+    "inventory_correct": true,
+    "shopping_list_correct": true,
+    "trajectory_pass": true,
+    "failure_recovery_applicable": false,
+    "failure_recovery_pass": true,
+    "guardrail_violations": {
+      "vegetarian_violations": 0,
+      "negative_inventory_events": 0,
+      "invalid_recipe_ids_materialized": 0,
+      "unreported_hard_constraint_failures": 0,
+      "invalid_shopping_list_quantities": 0
+    },
+    "overall_case_pass": true,
+    "latency_ms": 2164.94,
+    "tool_calls": 5,
+    "error": null
+  },
+  {
+    "case_id": "PTP-008",
+    "hard_constraint_pass": true,
+    "fixture_expectation_checks": {
+      "all_cuisine_match": true,
+      "high_pantry_coverage": true,
+      "days_returned": true
+    },
+    "fixture_expectation_score": 1.0,
+    "inventory_correct": true,
+    "shopping_list_correct": true,
+    "trajectory_pass": true,
+    "failure_recovery_applicable": false,
+    "failure_recovery_pass": true,
+    "guardrail_violations": {
+      "vegetarian_violations": 0,
+      "negative_inventory_events": 0,
+      "invalid_recipe_ids_materialized": 0,
+      "unreported_hard_constraint_failures": 0,
+      "invalid_shopping_list_quantities": 0
+    },
+    "overall_case_pass": true,
+    "latency_ms": 1809.829,
+    "tool_calls": 5,
+    "error": null
+  },
+  {
+    "case_id": "PTP-009",
+    "hard_constraint_pass": true,
+    "fixture_expectation_checks": {
+      "all_vegetarian": true,
+      "all_cuisine_match": true,
+      "all_within_calorie_band": true,
+      "days_returned": true
+    },
+    "fixture_expectation_score": 1.0,
+    "inventory_correct": true,
+    "shopping_list_correct": true,
+    "trajectory_pass": true,
+    "failure_recovery_applicable": false,
+    "failure_recovery_pass": true,
+    "guardrail_violations": {
+      "vegetarian_violations": 0,
+      "negative_inventory_events": 0,
+      "invalid_recipe_ids_materialized": 0,
+      "unreported_hard_constraint_failures": 0,
+      "invalid_shopping_list_quantities": 0
+    },
+    "overall_case_pass": true,
+    "latency_ms": 1911.279,
+    "tool_calls": 5,
+    "error": null
+  },
+  {
+    "case_id": "PTP-010",
+    "hard_constraint_pass": true,
+    "fixture_expectation_checks": {
+      "all_vegetarian": true,
+      "all_cuisine_match": true,
+      "days_returned": true
+    },
+    "fixture_expectation_score": 1.0,
+    "inventory_correct": true,
+    "shopping_list_correct": true,
+    "trajectory_pass": true,
+    "failure_recovery_applicable": false,
+    "failure_recovery_pass": true,
+    "guardrail_violations": {
+      "vegetarian_violations": 0,
+      "negative_inventory_events": 0,
+      "invalid_recipe_ids_materialized": 0,
+      "unreported_hard_constraint_failures": 0,
+      "invalid_shopping_list_quantities": 0
+    },
+    "overall_case_pass": true,
+    "latency_ms": 2167.434,
+    "tool_calls": 5,
+    "error": null
+  },
+  {
+    "case_id": "PTP-011",
+    "hard_constraint_pass": true,
+    "fixture_expectation_checks": {
+      "all_cuisine_match": true,
+      "all_within_calorie_band": true,
+      "exact_calorie_match_day_exists": true,
+      "fallback_flags": true,
+      "days_returned": true
+    },
+    "fixture_expectation_score": 1.0,
+    "inventory_correct": true,
+    "shopping_list_correct": true,
+    "trajectory_pass": true,
+    "failure_recovery_applicable": false,
+    "failure_recovery_pass": true,
+    "guardrail_violations": {
+      "vegetarian_violations": 0,
+      "negative_inventory_events": 0,
+      "invalid_recipe_ids_materialized": 0,
+      "unreported_hard_constraint_failures": 0,
+      "invalid_shopping_list_quantities": 0
+    },
+    "overall_case_pass": true,
+    "latency_ms": 1816.928,
+    "tool_calls": 5,
+    "error": null
+  },
+  {
+    "case_id": "PTP-012",
+    "hard_constraint_pass": true,
+    "fixture_expectation_checks": {
+      "all_cuisine_match": true,
+      "partial_pantry_coverage": true,
+      "days_returned": true
+    },
+    "fixture_expectation_score": 1.0,
+    "inventory_correct": true,
+    "shopping_list_correct": true,
+    "trajectory_pass": true,
+    "failure_recovery_applicable": false,
+    "failure_recovery_pass": true,
+    "guardrail_violations": {
+      "vegetarian_violations": 0,
+      "negative_inventory_events": 0,
+      "invalid_recipe_ids_materialized": 0,
+      "unreported_hard_constraint_failures": 0,
+      "invalid_shopping_list_quantities": 0
+    },
+    "overall_case_pass": true,
+    "latency_ms": 1923.89,
+    "tool_calls": 5,
+    "error": null
+  },
+  {
+    "case_id": "PTP-013",
+    "hard_constraint_pass": true,
+    "fixture_expectation_checks": {
+      "all_cuisine_match": true,
+      "low_pantry_coverage": true,
+      "days_returned": true
+    },
+    "fixture_expectation_score": 1.0,
+    "inventory_correct": true,
+    "shopping_list_correct": true,
+    "trajectory_pass": true,
+    "failure_recovery_applicable": true,
+    "failure_recovery_pass": true,
+    "guardrail_violations": {
+      "vegetarian_violations": 0,
+      "negative_inventory_events": 0,
+      "invalid_recipe_ids_materialized": 0,
+      "unreported_hard_constraint_failures": 0,
+      "invalid_shopping_list_quantities": 0
+    },
+    "overall_case_pass": true,
+    "latency_ms": 1789.032,
+    "tool_calls": 5,
+    "error": null
+  },
+  {
+    "case_id": "PTP-014",
+    "hard_constraint_pass": true,
+    "fixture_expectation_checks": {
+      "all_cuisine_match": true,
+      "days_returned": true
+    },
+    "fixture_expectation_score": 1.0,
+    "inventory_correct": true,
+    "shopping_list_correct": true,
+    "trajectory_pass": true,
+    "failure_recovery_applicable": false,
+    "failure_recovery_pass": true,
+    "guardrail_violations": {
+      "vegetarian_violations": 0,
+      "negative_inventory_events": 0,
+      "invalid_recipe_ids_materialized": 0,
+      "unreported_hard_constraint_failures": 0,
+      "invalid_shopping_list_quantities": 0
+    },
+    "overall_case_pass": true,
+    "latency_ms": 1834.817,
+    "tool_calls": 5,
+    "error": null
+  },
+  {
+    "case_id": "PTP-015",
+    "hard_constraint_pass": true,
+    "fixture_expectation_checks": {
+      "all_cuisine_match": true,
+      "high_pantry_coverage": true,
+      "shopping_list_small_or_empty": true,
+      "days_returned": true
+    },
+    "fixture_expectation_score": 1.0,
+    "inventory_correct": true,
+    "shopping_list_correct": true,
+    "trajectory_pass": true,
+    "failure_recovery_applicable": false,
+    "failure_recovery_pass": true,
+    "guardrail_violations": {
+      "vegetarian_violations": 0,
+      "negative_inventory_events": 0,
+      "invalid_recipe_ids_materialized": 0,
+      "unreported_hard_constraint_failures": 0,
+      "invalid_shopping_list_quantities": 0
+    },
+    "overall_case_pass": true,
+    "latency_ms": 1857.815,
+    "tool_calls": 5,
+    "error": null
+  },
+  {
+    "case_id": "PTP-016",
+    "hard_constraint_pass": true,
+    "fixture_expectation_checks": {
+      "all_vegetarian": true,
+      "all_cuisine_match": true,
+      "all_within_calorie_band": true,
+      "some_days_flagged_out_of_band": true,
+      "days_returned": true
+    },
+    "fixture_expectation_score": 1.0,
+    "inventory_correct": true,
+    "shopping_list_correct": true,
+    "trajectory_pass": true,
+    "failure_recovery_applicable": false,
+    "failure_recovery_pass": true,
+    "guardrail_violations": {
+      "vegetarian_violations": 0,
+      "negative_inventory_events": 0,
+      "invalid_recipe_ids_materialized": 0,
+      "unreported_hard_constraint_failures": 0,
+      "invalid_shopping_list_quantities": 0
+    },
+    "overall_case_pass": true,
+    "latency_ms": 1827.406,
+    "tool_calls": 5,
+    "error": null
+  },
+  {
+    "case_id": "PTP-017",
+    "hard_constraint_pass": true,
+    "fixture_expectation_checks": {
+      "low_pantry_coverage": true,
+      "all_cuisine_match": true,
+      "days_returned": true
+    },
+    "fixture_expectation_score": 1.0,
+    "inventory_correct": true,
+    "shopping_list_correct": true,
+    "trajectory_pass": true,
+    "failure_recovery_applicable": true,
+    "failure_recovery_pass": true,
+    "guardrail_violations": {
+      "vegetarian_violations": 0,
+      "negative_inventory_events": 0,
+      "invalid_recipe_ids_materialized": 0,
+      "unreported_hard_constraint_failures": 0,
+      "invalid_shopping_list_quantities": 0
+    },
+    "overall_case_pass": true,
+    "latency_ms": 1995.984,
+    "tool_calls": 5,
+    "error": null
+  },
+  {
+    "case_id": "PTP-018",
+    "hard_constraint_pass": true,
+    "fixture_expectation_checks": {
+      "all_cuisine_match": true,
+      "high_pantry_coverage": true,
+      "days_returned": true
+    },
+    "fixture_expectation_score": 1.0,
+    "inventory_correct": true,
+    "shopping_list_correct": true,
+    "trajectory_pass": true,
+    "failure_recovery_applicable": false,
+    "failure_recovery_pass": true,
+    "guardrail_violations": {
+      "vegetarian_violations": 0,
+      "negative_inventory_events": 0,
+      "invalid_recipe_ids_materialized": 0,
+      "unreported_hard_constraint_failures": 0,
+      "invalid_shopping_list_quantities": 0
+    },
+    "overall_case_pass": true,
+    "latency_ms": 1837.035,
+    "tool_calls": 5,
+    "error": null
+  },
+  {
+    "case_id": "PTP-019",
+    "hard_constraint_pass": true,
+    "fixture_expectation_checks": {
+      "all_vegetarian": true,
+      "all_cuisine_match": true,
+      "days_returned": true
+    },
+    "fixture_expectation_score": 1.0,
+    "inventory_correct": true,
+    "shopping_list_correct": true,
+    "trajectory_pass": true,
+    "failure_recovery_applicable": false,
+    "failure_recovery_pass": true,
+    "guardrail_violations": {
+      "vegetarian_violations": 0,
+      "negative_inventory_events": 0,
+      "invalid_recipe_ids_materialized": 0,
+      "unreported_hard_constraint_failures": 0,
+      "invalid_shopping_list_quantities": 0
+    },
+    "overall_case_pass": true,
+    "latency_ms": 1969.927,
+    "tool_calls": 5,
+    "error": null
+  },
+  {
+    "case_id": "PTP-020",
+    "hard_constraint_pass": true,
+    "fixture_expectation_checks": {
+      "all_cuisine_match": true,
+      "mixed_pantry_coverage": true,
+      "days_returned": true
+    },
+    "fixture_expectation_score": 1.0,
+    "inventory_correct": true,
+    "shopping_list_correct": true,
+    "trajectory_pass": true,
+    "failure_recovery_applicable": false,
+    "failure_recovery_pass": true,
+    "guardrail_violations": {
+      "vegetarian_violations": 0,
+      "negative_inventory_events": 0,
+      "invalid_recipe_ids_materialized": 0,
+      "unreported_hard_constraint_failures": 0,
+      "invalid_shopping_list_quantities": 0
+    },
+    "overall_case_pass": true,
+    "latency_ms": 1903.71,
+    "tool_calls": 5,
+    "error": null
+  },
+  {
+    "case_id": "PTP-021",
+    "hard_constraint_pass": true,
+    "fixture_expectation_checks": {
+      "low_pantry_coverage": true,
+      "unrecognized_items_ignored": true,
+      "all_cuisine_match": true,
+      "days_returned": true
+    },
+    "fixture_expectation_score": 1.0,
+    "inventory_correct": true,
+    "shopping_list_correct": true,
+    "trajectory_pass": true,
+    "failure_recovery_applicable": true,
+    "failure_recovery_pass": true,
+    "guardrail_violations": {
+      "vegetarian_violations": 0,
+      "negative_inventory_events": 0,
+      "invalid_recipe_ids_materialized": 0,
+      "unreported_hard_constraint_failures": 0,
+      "invalid_shopping_list_quantities": 0
+    },
+    "overall_case_pass": true,
+    "latency_ms": 1860.992,
+    "tool_calls": 5,
+    "error": null
+  },
+  {
+    "case_id": "PTP-022",
+    "hard_constraint_pass": true,
+    "fixture_expectation_checks": {
+      "partial_pantry_coverage": true,
+      "unrecognized_items_ignored": true,
+      "all_cuisine_match": true,
+      "days_returned": true
+    },
+    "fixture_expectation_score": 1.0,
+    "inventory_correct": true,
+    "shopping_list_correct": true,
+    "trajectory_pass": true,
+    "failure_recovery_applicable": true,
+    "failure_recovery_pass": true,
+    "guardrail_violations": {
+      "vegetarian_violations": 0,
+      "negative_inventory_events": 0,
+      "invalid_recipe_ids_materialized": 0,
+      "unreported_hard_constraint_failures": 0,
+      "invalid_shopping_list_quantities": 0
+    },
+    "overall_case_pass": true,
+    "latency_ms": 1940.224,
+    "tool_calls": 5,
+    "error": null
+  },
+  {
+    "case_id": "PTP-023",
+    "hard_constraint_pass": true,
+    "fixture_expectation_checks": {
+      "low_pantry_coverage": true,
+      "unrecognized_items_ignored": true,
+      "all_cuisine_match": true,
+      "days_returned": true
+    },
+    "fixture_expectation_score": 1.0,
+    "inventory_correct": true,
+    "shopping_list_correct": true,
+    "trajectory_pass": true,
+    "failure_recovery_applicable": true,
+    "failure_recovery_pass": true,
+    "guardrail_violations": {
+      "vegetarian_violations": 0,
+      "negative_inventory_events": 0,
+      "invalid_recipe_ids_materialized": 0,
+      "unreported_hard_constraint_failures": 0,
+      "invalid_shopping_list_quantities": 0
+    },
+    "overall_case_pass": true,
+    "latency_ms": 1895.288,
+    "tool_calls": 5,
+    "error": null
+  }
+]

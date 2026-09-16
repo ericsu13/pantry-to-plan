@@ -13,6 +13,7 @@ dependencies = [
     "pinecone>=4.0.0",
     "python-dotenv>=1.0.0",
     "langsmith>=0.3.13,<1",
+    "mcp>=1.12,<2",
 ]
 
 [project.optional-dependencies]

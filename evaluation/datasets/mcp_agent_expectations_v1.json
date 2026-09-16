@@ -1,0 +1,10 @@
+{
+  "PTP-004": {
+    "all_vegetarian": true,
+    "no_non_vegetarian_selected": true,
+    "days_returned": 7,
+    "reports_constraint_prevented_completion": false,
+    "cross_cuisine_flagged": true,
+    "notes": "The MCP agent may fill day 7 with a grounded vegetarian recipe from another cuisine. The soft cuisine relaxation must be explicit; vegetarian remains mandatory."
+  }
+}
