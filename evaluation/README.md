@@ -53,3 +53,23 @@ conservative case pass. Latency and call counts are stored in local results.
 The deterministic mode uses `LocalRetriever`, `temperature=0`, and no advisor.
 The future agentic mode uses `FakePlannerAdvisor`, `temperature=0`, and the same
 local retrieval backend.
+
+## Single agent + MCP evaluation
+
+The MCP evaluation executes the same 23 golden cases with a deterministic
+decision-model stand-in over the real local stdio MCP server:
+
+```bash
+uv run python -m evaluation.run_mcp_agent_eval
+```
+
+The stand-in chooses later actions from actual tool observations, keeping the
+trajectory repeatable and free of model cost. The run covers MCP discovery,
+grounded search, exact recipe lookup, deterministic scoring, simulation,
+mandatory final validation, depletion, and shopping reconciliation. Results
+are written under `evaluation/results/baseline-mcp-agent-fake-v1/`.
+
+`PTP-004` has an explicit agent-mode expectation: the deterministic baseline
+returns six American vegetarian days, while the agent may fill day seven with a
+grounded vegetarian cross-cuisine recipe only when the soft cuisine relaxation
+is visibly flagged. Neither mode may relax vegetarian.

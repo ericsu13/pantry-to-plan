@@ -15,6 +15,8 @@ import json
 import os
 import random
 from pathlib import Path
+import sys
+import traceback
 
 from config import ALL_CUISINES, GOAL_CALORIE_TOLERANCE
 from inventory import build_shopping_list  # noqa: F401  (re-exported for callers/tests)
@@ -29,6 +31,7 @@ from schemas import (
     PlanningRequest,
     PlanResult,
     RecipeCandidate,
+    TraceEvent,
 )
 from vision_ui_helpers import candidates_to_editor_rows, editor_rows_to_pantry
 
@@ -329,8 +332,49 @@ def build_advisor():
     )
 
 
+def mcp_agent_status() -> tuple[bool, str]:
+    """Whether the single-agent MCP planner is available for a live run."""
+    from config import load_settings
+
+    settings = load_settings()
+    if not settings.mcp_agent_enabled:
+        return False, "MCP agent planning is disabled by MCP_AGENT_ENABLED."
+    if not os.environ.get("OPENAI_API_KEY"):
+        return False, "Set OPENAI_API_KEY to enable Agent + MCP planning."
+    if not (ROOT / "meal_tools_server.py").exists():
+        return False, "The local meal-tools MCP server is unavailable."
+    return True, ""
+
+
+def build_mcp_agent():
+    """Construct the bounded tool-using agent and its local stdio MCP client."""
+    from config import load_settings
+    from mcp_planner_agent import MCPPlannerAgent, OpenAIToolDecisionModel
+    from meal_tools_client import StdioMealToolsClient
+
+    settings = load_settings()
+    model = OpenAIToolDecisionModel(model=settings.mcp_agent_model, temperature=0.0)
+    return MCPPlannerAgent(
+        model,
+        client_factory=lambda: StdioMealToolsClient(
+            timeout_seconds=settings.mcp_tool_timeout_seconds
+        ),
+        max_tool_calls=settings.mcp_max_tool_calls,
+        max_plan_revisions=settings.mcp_max_plan_revisions,
+        total_timeout_seconds=settings.mcp_agent_total_timeout_seconds,
+    )
+
+
 # ---------------------------------------------------------------- run planner
-def run_plan(pantry: PantryState, request: PlanningRequest, advisor=None, progress=None) -> PlanResult:
+def run_plan(
+    pantry: PantryState,
+    request: PlanningRequest,
+    advisor=None,
+    progress=None,
+    *,
+    mode: str = "standard",
+    mcp_agent=None,
+) -> PlanResult:
     """Drive the deterministic pipeline, emitting coarse stage strings through an
     optional progress(msg) callback for the UI to display."""
 
@@ -338,11 +382,66 @@ def run_plan(pantry: PantryState, request: PlanningRequest, advisor=None, progre
         if progress is not None:
             progress(msg)
 
+    if mode not in {"standard", "mcp_agent"}:
+        raise ValueError("mode must be 'standard' or 'mcp_agent'")
+
     emit("Reading your preferences...")
+    if mode == "mcp_agent":
+        from mcp_planner_agent import run_mcp_agent_sync
+
+        emit("Starting the single planning agent and connecting its MCP tools...")
+        try:
+            agent = mcp_agent or build_mcp_agent()
+            result = run_mcp_agent_sync(pantry, request, agent)
+            emit("The deterministic validator approved the agent's plan.")
+            return result
+        except Exception as exc:  # noqa: BLE001 - this boundary intentionally degrades safely
+            print(
+                f"Agent + MCP fallback: {type(exc).__name__}: {exc}",
+                file=sys.stderr,
+                )
+            traceback.print_exception(exc, file=sys.stderr)
+            emit("Agent + MCP planning was unavailable; using the standard planner.")
+            retriever = get_retriever()
+            from config import load_settings
+
+            settings = load_settings()
+            result = generate_plan(
+                pantry,
+                request,
+                retriever,
+                top_k=settings.top_k,
+                temperature=settings.selection_temperature,
+                advisor=None,
+            )
+            result.warnings.append("MCP_AGENT_FALLBACK")
+            result.trace.insert(
+                0,
+                TraceEvent(
+                    step="agent_fallback",
+                    message="Agent + MCP failed; standard planner completed the request.",
+                    data={
+                        "error_type": type(exc).__name__,
+                        "error_message": str(exc)[:500],
+                    },
+                ),
+            )
+            return result
+
     retriever = get_retriever()
     emit("Retrieving candidate recipes...")
     emit(f"Scoring recipes and building your {request.days}-day plan...")
-    result = generate_plan(pantry, request, retriever, advisor=advisor)
+    from config import load_settings
+
+    settings = load_settings()
+    result = generate_plan(
+        pantry,
+        request,
+        retriever,
+        top_k=settings.top_k,
+        temperature=settings.selection_temperature,
+        advisor=advisor,
+    )
     emit("Aggregating your shopping list...")
     return result
 
@@ -355,6 +454,8 @@ _WARNING_TEXT = {
     "(flagged on the day it appears).",
     "RELAXED_REPEAT": "To fill every day a recipe had to repeat.",
     "UNKNOWN_RECIPE_ID": "A retrieved recipe was not found in the corpus and was skipped.",
+    "MCP_AGENT_FALLBACK": "Agent + MCP planning could not complete safely, so the "
+    "standard planner produced this plan instead.",
 }
 
 FLAG_LABELS = {

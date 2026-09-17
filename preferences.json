@@ -1,0 +1,9 @@
+{
+  "cuisines": [
+    "indian"
+  ],
+  "dinner_calorie_target": 450,
+  "days": 4,
+  "vegetarian_required": true,
+  "goal": "nutritional"
+}

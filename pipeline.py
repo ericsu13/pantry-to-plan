@@ -50,6 +50,7 @@ from constraints import validate_eligibility
 from inventory import apply_recipe, build_shopping_list
 from repository import get_recipe
 from schemas import (
+    AppIssue,
     CandidateScore,
     DayPlan,
     PantryState,
@@ -69,6 +70,125 @@ class Retriever(Protocol):
         self, pantry: PantryState, request: PlanningRequest, top_k: int
     ) -> list[RecipeCandidate]:
         ...
+
+
+def materialize_agent_proposal(
+    pantry: PantryState,
+    request: PlanningRequest,
+    ordered_recipe_ids: list[str],
+    *,
+    require_complete: bool = True,
+) -> tuple[PlanResult, list[AppIssue]]:
+    """Validate and materialize a recipe ordering proposed by an external agent.
+
+    The agent is allowed to choose recipe ids and their order. This function
+    retains authority over corpus lookup, the vegetarian gate, scoring, pantry
+    depletion, calorie flags, and shopping-list arithmetic. Invalid ids,
+    duplicates, and hard-constraint violations are rejected rather than
+    materialized. The returned partial PlanResult is useful diagnostic evidence
+    even when ``issues`` prevents approval.
+    """
+    initial = pantry.model_copy(deep=True)
+    current = pantry.model_copy(deep=True)
+    low, high = calorie_band(request)
+    used: set[str] = set()
+    day_plans: list[DayPlan] = []
+    warnings: list[str] = []
+    trace: list[TraceEvent] = []
+    issues: list[AppIssue] = []
+
+    if len(ordered_recipe_ids) > request.days:
+        issues.append(
+            AppIssue(
+                code="TOO_MANY_RECIPES",
+                message=f"Proposal contains more than {request.days} recipes.",
+                field="ordered_recipe_ids",
+                recoverable=True,
+                suggested_action="Return no more than the requested number of days.",
+            )
+        )
+
+    for rid in ordered_recipe_ids[: request.days]:
+        recipe = get_recipe(rid)
+        if recipe is None:
+            issues.append(
+                AppIssue(
+                    code="UNKNOWN_RECIPE_ID",
+                    message=f"Recipe id {rid!r} is not in the trusted corpus.",
+                    field="ordered_recipe_ids",
+                    recoverable=True,
+                    suggested_action="Use only recipe ids returned by the recipe tools.",
+                )
+            )
+            trace.append(TraceEvent(step="agent_validate", message=f"rejected unknown id: {rid}"))
+            continue
+        if rid in used:
+            issues.append(
+                AppIssue(
+                    code="DUPLICATE_RECIPE",
+                    message=f"Recipe {rid!r} appears more than once.",
+                    field="ordered_recipe_ids",
+                    recoverable=True,
+                    suggested_action="Choose a distinct recipe for each day.",
+                )
+            )
+            trace.append(TraceEvent(step="agent_validate", message=f"rejected duplicate id: {rid}"))
+            continue
+
+        eligibility = validate_eligibility(recipe, request)
+        if not eligibility.eligible:
+            for reason in eligibility.reject_reasons:
+                issues.append(reason)
+            trace.append(
+                TraceEvent(
+                    step="agent_validate",
+                    message=f"rejected ineligible recipe: {rid}",
+                    data={"reasons": [reason.code for reason in eligibility.reject_reasons]},
+                )
+            )
+            continue
+
+        day = len(day_plans) + 1
+        score = score_recipe(recipe, current, request, used)
+        cross_cuisine = score.cuisine_score <= 0
+        if cross_cuisine and "RELAXED_CROSS_CUISINE" not in warnings:
+            warnings.append("RELAXED_CROSS_CUISINE")
+        current = _append_day(
+            day,
+            score,
+            recipe,
+            request,
+            low,
+            high,
+            cross_cuisine,
+            day_plans,
+            trace,
+            current,
+            {"source": "mcp_agent"},
+        )
+        used.add(rid)
+
+    if require_complete and len(day_plans) != request.days:
+        issues.append(
+            AppIssue(
+                code="INCOMPLETE_PLAN",
+                message=f"Validated {len(day_plans)} of {request.days} requested days.",
+                field="ordered_recipe_ids",
+                recoverable=True,
+                suggested_action="Search again or revise the proposal with more eligible recipes.",
+            )
+        )
+        warnings.append("NO_ELIGIBLE_RECIPE")
+
+    result = PlanResult(
+        requested_days=request.days,
+        day_plans=day_plans,
+        final_pantry=current.items,
+        shopping_list=build_shopping_list(day_plans, initial),
+        warnings=warnings,
+        trace=trace,
+    )
+    return result, issues
 
 
 # --------------------------------------------------------------- shared core
@@ -212,6 +332,25 @@ def _greedy_plan(
 
             scores = _resolve_and_score(candidates, current, request, used, day, trace, warnings)
             selectable = _selectable(scores, used, allow_repeat=False, allow_cross_cuisine=False)
+            # A small semantic top-k can be crowded by pantry-similar recipes
+            # from other cuisines. Before declaring a false no-result, expand
+            # retrieval once and reapply the exact same deterministic gates.
+            if not selectable and top_k < WEEK_POOL_TOP_K:
+                expanded = retriever.search(current, request, WEEK_POOL_TOP_K)
+                trace.append(
+                    TraceEvent(
+                        step="retrieve",
+                        day=day,
+                        message=f"expanded retrieval to {len(expanded)} candidate(s)",
+                        data={"ids": [candidate.recipe_id for candidate in expanded]},
+                    )
+                )
+                scores = _resolve_and_score(
+                    expanded, current, request, used, day, trace, warnings
+                )
+                selectable = _selectable(
+                    scores, used, allow_repeat=False, allow_cross_cuisine=False
+                )
             if not selectable:
                 warnings.append("NO_ELIGIBLE_RECIPE")
                 trace.append(

@@ -45,6 +45,14 @@ WEEK_POOL_TOP_K = 24         # candidate pool the week planner reasons over
 MAX_RELAXATION_ROUNDS = 4    # per-day cap on relax-and-repair rounds (bounds termination)
 ADVISOR_MODEL = "gpt-4o"     # OpenAI model for the live advisor (env-overridable)
 
+# Single-agent MCP planner. The model chooses which MCP tool to call next, but
+# these bounds and the deterministic final validator retain operational control.
+MCP_AGENT_MODEL = "gpt-4o"
+MCP_MAX_TOOL_CALLS = 15
+MCP_MAX_PLAN_REVISIONS = 3
+MCP_TOOL_TIMEOUT_SECONDS = 30.0
+MCP_AGENT_TOTAL_TIMEOUT_SECONDS = 120.0
+
 # Selection temperature for the per-day pick. The planner samples among the
 # eligible, in-cuisine, unused candidates with probability proportional to
 # exp(total_score / T) instead of always taking the argmax, so the same pantry
@@ -90,6 +98,24 @@ class Settings:
         self.week_pool_top_k = int(os.environ.get("WEEK_POOL_TOP_K", WEEK_POOL_TOP_K))
         self.max_relaxation_rounds = int(
             os.environ.get("MAX_RELAXATION_ROUNDS", MAX_RELAXATION_ROUNDS)
+        )
+        self.mcp_agent_enabled = (
+            os.environ.get("MCP_AGENT_ENABLED", "true").lower() == "true"
+        )
+        self.mcp_agent_model = os.environ.get("MCP_AGENT_MODEL", MCP_AGENT_MODEL)
+        self.mcp_max_tool_calls = int(
+            os.environ.get("MCP_MAX_TOOL_CALLS", MCP_MAX_TOOL_CALLS)
+        )
+        self.mcp_max_plan_revisions = int(
+            os.environ.get("MCP_MAX_PLAN_REVISIONS", MCP_MAX_PLAN_REVISIONS)
+        )
+        self.mcp_tool_timeout_seconds = float(
+            os.environ.get("MCP_TOOL_TIMEOUT_SECONDS", MCP_TOOL_TIMEOUT_SECONDS)
+        )
+        self.mcp_agent_total_timeout_seconds = float(
+            os.environ.get(
+                "MCP_AGENT_TOTAL_TIMEOUT_SECONDS", MCP_AGENT_TOTAL_TIMEOUT_SECONDS
+            )
         )
 
 

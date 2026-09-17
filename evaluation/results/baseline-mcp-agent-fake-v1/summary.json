@@ -1,0 +1,7 @@
+{
+  "cases": 23,
+  "passed": 23,
+  "failed": 0,
+  "average_latency_ms": 1905.131,
+  "scope": "single fake decision model over real local stdio MCP tools; vision excluded"
+}
